@@ -1,19 +1,33 @@
 #!/usr/bin/env python3
-"""Slack notification management -- digest and status updates.
+"""Slack daily digest — runner-triggered, zero LLM tokens.
+
+Called by bot/run.py after each cycle. Checks conditions locally
+(hour, weekend, webhook) before calling the memory server MCP tool.
 
 Usage:
-    python3 .claude/skills/slack-digest/slack_cmd.py digest
-    python3 .claude/skills/slack-digest/slack_cmd.py status <JIRA_KEY>
-    python3 .claude/skills/slack-digest/slack_cmd.py <JIRA_KEY>   (shorthand for status)
+    python3 bot/slack_digest.py digest
+    python3 bot/slack_digest.py status <JIRA_KEY>
 """
 
 import json
+import logging
 import os
 import sys
-from pathlib import Path
+from datetime import datetime, timezone
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from memory_mcp import memory_call, memory_cleanup
+from .memory_mcp import memory_call, memory_cleanup
+
+logger = logging.getLogger(__name__)
+
+
+def try_slack_digest() -> None:
+    """Entry point called by bot/run.py after each cycle. Zero LLM tokens."""
+    if not os.environ.get("SLACK_WEBHOOK_URL"):
+        return
+    try:
+        cmd_digest()
+    except Exception as e:
+        logger.warning("Slack digest failed: %s", e)
 
 
 def cmd_digest():
@@ -22,12 +36,26 @@ def cmd_digest():
         print(json.dumps({"sent": False, "reason": "SLACK_WEBHOOK_URL not set"}))
         return
 
+    now = datetime.now(timezone.utc)
+
+    if now.weekday() >= 5:
+        print(json.dumps({"sent": False, "reason": "Weekend — digest skipped"}))
+        return
+
+    digest_hour = int(os.environ.get("SLACK_DIGEST_HOUR", "9"))
+    if now.hour < digest_hour:
+        print(json.dumps({"sent": False, "reason": f"Before digest hour (current: {now.hour}, target: {digest_hour})"}))
+        return
+
     instance_id = os.environ.get("BOT_INSTANCE_ID") or None
+    digest_key = f"digest-{instance_id or 'all'}-{now.strftime('%Y-%m-%d')}"
+
     result = memory_call(
         "slack_send_digest",
         {
             "instance_id": instance_id,
             "webhook_url": webhook_url,
+            "digest_key": digest_key,
         },
     )
     memory_cleanup()

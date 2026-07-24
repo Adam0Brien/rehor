@@ -208,6 +208,12 @@ def _check_wake_signal(instance_id: str) -> bool:
         return False
 
 
+def _try_slack_digest() -> None:
+    from .slack_digest import try_slack_digest
+
+    try_slack_digest()
+
+
 def _write_sleep_signal(seconds: int, reason: str) -> None:
     """Write a sleep signal file for the runner to read after the cycle."""
     SLEEP_SIGNAL_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -542,6 +548,8 @@ def main() -> None:
                 )
             else:
                 logger.warning("Cycle produced no result")
+
+            _try_slack_digest()
 
             _read_sleep_signal(config, instance_id)
 

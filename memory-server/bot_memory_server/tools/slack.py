@@ -54,6 +54,21 @@ def register_slack_tools(mcp: FastMCP):
         notify_mode = os.environ.get("SLACK_NOTIFY_MODE", "immediate")
 
         if notify_mode == "daily_digest":
+            existing = await pool.fetchrow(
+                """
+                SELECT id FROM slack_digest_queue
+                WHERE jira_key = $1 AND event_type = $2 AND sent = FALSE
+                """,
+                external_key,
+                event_type,
+            )
+            if existing:
+                return {
+                    "sent": False,
+                    "queued": False,
+                    "reason": f"Already queued: {event_type} for {external_key}",
+                }
+
             await pool.execute(
                 """
                 INSERT INTO slack_digest_queue
@@ -131,25 +146,35 @@ def register_slack_tools(mcp: FastMCP):
     async def slack_send_digest(
         instance_id: Optional[str] = None,
         webhook_url: Optional[str] = os.environ.get("SLACK_WEBHOOK_URL"),
+        digest_key: Optional[str] = None,
     ) -> dict:
         """Send a daily digest of queued Slack notifications.
 
         Groups events by jira_key, formats a single summary message, and sends
-        to the webhook. Skips weekends (Sat/Sun — events accumulate to Monday).
-        Skips silently when the queue is empty.
+        to the webhook. Skips silently when the queue is empty.
+
+        Timing and weekend checks are handled by the caller (bot runner).
+        This tool handles sent-today deduplication via digest_key in
+        slack_notifications table.
 
         instance_id: Filter queued items by bot instance (optional).
         webhook_url: Slack webhook URL. Defaults to SLACK_WEBHOOK_URL env var.
+        digest_key: Deterministic key (e.g. digest-instance-2026-07-28) for
+            sent-today deduplication. If already in slack_notifications, skips.
 
         Returns {"sent": true/false, "count": N, "reason": "..."}."""
         if not webhook_url:
             return {"sent": False, "count": 0, "reason": "SLACK_WEBHOOK_URL not configured"}
 
-        now = datetime.now(timezone.utc)
-        if now.weekday() >= 5:
-            return {"sent": False, "count": 0, "reason": "Weekend — digest skipped"}
-
         pool = get_pool()
+
+        if digest_key:
+            already_sent = await pool.fetchrow(
+                "SELECT id FROM slack_notifications WHERE external_key = $1",
+                digest_key,
+            )
+            if already_sent:
+                return {"sent": False, "count": 0, "reason": f"Digest already sent: {digest_key}"}
 
         if instance_id:
             rows = await pool.fetch(
@@ -172,6 +197,7 @@ def register_slack_tools(mcp: FastMCP):
         if not rows:
             return {"sent": False, "count": 0, "reason": "No items to digest"}
 
+        now = datetime.now(timezone.utc)
         digest_message = _format_digest(instance_id, rows, now)
 
         try:
@@ -187,6 +213,18 @@ def register_slack_tools(mcp: FastMCP):
             "UPDATE slack_digest_queue SET sent = TRUE WHERE id = ANY($1::int[])",
             row_ids,
         )
+
+        if digest_key:
+            await pool.execute(
+                """
+                INSERT INTO slack_notifications (external_key, source_type, event_type, message)
+                VALUES ($1, $2, $3, $4)
+                """,
+                digest_key,
+                "digest",
+                "daily_digest",
+                digest_message,
+            )
 
         await bus.publish(
             Event(

@@ -228,8 +228,8 @@ function TranscriptViewer({ runId, onRequestFullscreen }: { runId: number; onReq
         </FlexItem>
         <FlexItem style={{ flexShrink: 0 }}>
           <ToggleGroup aria-label="View options">
-            <ToggleGroupItem text="Thinking" isSelected={showThinking} onChange={() => setShowThinking(!showThinking)} />
-            <ToggleGroupItem text="Raw" isSelected={rawMode} onChange={() => setRawMode(!rawMode)} />
+            <ToggleGroupItem text="Thinking" isSelected={showThinking} onChange={() => { setShowThinking(!showThinking); setRawMode(false); }} />
+            <ToggleGroupItem text="Raw" isSelected={rawMode} onChange={() => { setRawMode(!rawMode); setShowThinking(false); }} />
           </ToggleGroup>
         </FlexItem>
       </Flex>

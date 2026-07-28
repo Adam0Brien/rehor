@@ -313,6 +313,7 @@ header {
 
 .instance-grid > * {
   height: 100%;
+  animation: fadeSlideIn 0.5s ease-out;
 }
 
 .pf-v6-c-nav.pf-m-horizontal {
@@ -630,6 +631,10 @@ select:focus,
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.card-grid > * {
+  animation: fadeSlideIn 0.5s ease-out;
 }
 
 /* Task card */
@@ -1708,6 +1713,7 @@ select:focus,
 
 /* Task group cards (cycle runs grouped by task) */
 .task-group-list { display: flex; flex-direction: column; gap: 4px; }
+.task-group-list > * { animation: fadeSlideIn 0.5s ease-out; }
 .task-group-card {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -1808,6 +1814,21 @@ select:focus,
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+.task-group-cycles > * {
+  animation: fadeSlideIn 0.5s ease-out;
+}
+
+@keyframes fadeSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* Empty state */

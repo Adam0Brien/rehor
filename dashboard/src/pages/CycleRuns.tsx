@@ -550,8 +550,8 @@ export default function CycleRuns({ instanceId }: { instanceId?: string }) {
     setGroups(data || []);
   }, [instanceId]);
 
-  const loadCyclesForTask = useCallback(async (taskId: number | null, orphan = false) => {
-    setLoadingRuns(true);
+  const loadCyclesForTask = useCallback(async (taskId: number | null, orphan = false, showLoading = true) => {
+    if (showLoading) setLoadingRuns(true);
     try {
       const params: { task_id?: number | 'none'; instance_id?: string; limit: number } = { limit: 50 };
       if (taskId != null) params.task_id = taskId;
@@ -561,7 +561,7 @@ export default function CycleRuns({ instanceId }: { instanceId?: string }) {
       setRuns(res.items || []);
       return res.items || [];
     } finally {
-      setLoadingRuns(false);
+      if (showLoading) setLoadingRuns(false);
     }
   }, [instanceId]);
 
@@ -572,25 +572,32 @@ export default function CycleRuns({ instanceId }: { instanceId?: string }) {
   useEffect(() => {
     const cycleParam = searchParams.get('cycle');
     const taskParam = searchParams.get('task_id');
-    if (cycleParam && groups.length > 0) {
+    if (cycleParam && groups.length > 0 && !selectedRun) {
       const cycleId = parseInt(cycleParam);
       const tid = taskParam ? parseInt(taskParam) : null;
       const match = groups.find((g) => g.task_id === tid);
       setExpandedGroupKey(match ? groupKey(match) : tid != null ? `t:${tid}` : 'orphan');
-      loadCyclesForTask(tid, tid == null).then((items) => {
+      loadCyclesForTask(tid, tid == null, false).then((items) => {
         const found = items.find((r: CycleRun) => r.id === cycleId);
         if (found) setSelectedRun(found);
       });
     }
-  }, [searchParams, groups, loadCyclesForTask]);
+  }, [groups, loadCyclesForTask]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     return onEvent((event) => {
       if (event.type === 'cycle_run_added') {
         loadGroups();
+        if (expandedGroupKey) {
+          const expanded = groups.find((g) => groupKey(g) === expandedGroupKey);
+          if (expanded) {
+            const isOrphan = expanded.task_id == null && !expanded.external_key;
+            loadCyclesForTask(expanded.task_id, isOrphan, false);
+          }
+        }
       }
     });
-  }, [onEvent, loadGroups]);
+  }, [onEvent, loadGroups, expandedGroupKey, groups, loadCyclesForTask]);
 
   const handleGroupClick = async (g: TaskCycleGroup) => {
     const key = groupKey(g);

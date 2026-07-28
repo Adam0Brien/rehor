@@ -22,11 +22,13 @@ python3 .claude/skills/post-plan/post_plan.py '<json_config>' 2>&1
 {
   "epic_key": "RHCLOUD-12345",
   "instance_name": "my-team-agent-dev",
+  "config_name": "my-team-config",
   "bot_name": "devbot-myteam",
   "bot_label": "rehor-ai-myteam",
   "workflow": "jira-sprint",
   "repos": ["https://github.com/RedHatInsights/my-app"],
   "tech_stacks": {"my-app": {"stack": ["react", "typescript"], "envs": ["node", "browser"]}},
-  "envs_and_personas": "node, browser | frontend"
+  "envs_and_personas": "node, browser | frontend",
+  "dedicated_proxy": false
 }
 ```

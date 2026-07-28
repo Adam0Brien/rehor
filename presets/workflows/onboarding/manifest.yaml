@@ -24,7 +24,6 @@ provides:
     - post-plan
     - post-konflux-questions
     - post-konflux-instructions
-    - post-deployment-confirmation
     - post-manual-steps
 
 requires:

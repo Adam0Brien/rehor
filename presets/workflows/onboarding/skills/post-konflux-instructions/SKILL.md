@@ -21,8 +21,7 @@ python3 .claude/skills/post-konflux-instructions/post_konflux_instructions.py '<
 ```json
 {
   "epic_key": "RHCLOUD-12345",
-  "component_name": "my-team-agent-dev",
-  "quay_org": "my-team-tenant",
-  "instance_name": "my-team-agent-dev"
+  "instance_name": "my-team-agent-dev",
+  "quay_org": "my-team-tenant"
 }
 ```

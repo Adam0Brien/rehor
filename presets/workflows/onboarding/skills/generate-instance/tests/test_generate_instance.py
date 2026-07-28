@@ -48,6 +48,20 @@ BROWSER_CONFIG = {
     ],
 }
 
+ONBOARDING_CONFIG = {
+    "instance_name": "onboarding-agent-dev",
+    "config_name": "onboarding-config",
+    "team_name": "Onboarding Team",
+    "workflow": "onboarding",
+    "envs": ["node"],
+    "repos": [
+        {
+            "name": "target-repo",
+            "url": "https://github.com/RedHatInsights/target-repo.git",
+        }
+    ],
+}
+
 
 class TestSchemaValidation:
     def test_valid_sprint_config(self):
@@ -286,3 +300,36 @@ class TestOutputValidation:
         deploy.write_text(":\n  bad:\n    - :\n  :\n")
         errors = validate_output(str(tmp_path))
         assert any("Invalid YAML" in e or "missing required marker" in e for e in errors)
+
+
+class TestOnboardingWorkflow:
+    def test_valid_schema(self):
+        _validate_input(ONBOARDING_CONFIG)
+
+    def test_generates_all_files(self, tmp_path):
+        result = generate(ONBOARDING_CONFIG, str(tmp_path))
+        assert "deploy/template.yaml" in result["files"]
+        assert "instance/onboarding-config/agent/instance.yaml" in result["files"]
+
+    def test_deploy_has_no_sprint_params(self, tmp_path):
+        generate(ONBOARDING_CONFIG, str(tmp_path))
+        content = (tmp_path / "deploy" / "template.yaml").read_text()
+        assert "BOT_BOARD_NAME" not in content
+        assert "BOT_SPRINT_PREFIX" not in content
+
+    def test_deploy_has_no_kanban_params(self, tmp_path):
+        generate(ONBOARDING_CONFIG, str(tmp_path))
+        content = (tmp_path / "deploy" / "template.yaml").read_text()
+        assert "BOT_BOARD_ID" not in content
+        assert "BOT_JIRA_PROJECT" not in content
+
+    def test_deploy_yaml_is_valid(self, tmp_path):
+        generate(ONBOARDING_CONFIG, str(tmp_path))
+        content = (tmp_path / "deploy" / "template.yaml").read_text()
+        parsed = yaml.safe_load(content)
+        assert parsed["kind"] == "Template"
+
+    def test_output_validates(self, tmp_path):
+        generate(ONBOARDING_CONFIG, str(tmp_path))
+        errors = validate_output(str(tmp_path))
+        assert errors == []

@@ -59,7 +59,7 @@ Bot applies exactly one `onboarding:*` label. Preflight reads labels for state.
 | `onboarding:scaffolding-pr` | 1 | PR merged | Phase 1 ticket→Done, `/post-konflux-questions` |
 | `onboarding:konflux-info` | 2 | team responded | `/generate-konflux`, open MR |
 | `onboarding:konflux-mr` | 2 | MR merged | `/post-konflux-instructions` |
-| `onboarding:tekton-setup` | 2 | pipelines+Quay | Phase 2 ticket→Done, `/post-deployment-confirmation` |
+| `onboarding:tekton-setup` | 2 | pipelines+Quay | Phase 2 ticket→Done, gather deploy details (dedicated: checkpoint), `/generate-app-interface`, open MR |
 | `onboarding:app-interface-mr` | 3 | MR merged | `/post-manual-steps` |
 | `onboarding:manual-steps` | 3 | steps confirmed | verify deployment |
 | `onboarding:verification` | 3 | verified | close epic |
@@ -86,7 +86,7 @@ Task metadata:
 
 ### `onboarding:intake`
 
-Read ticket. Extract pre-filled values. Run `/post-intake` `{"epic_key", "prefilled": {...}}`. Store pre-filled in metadata `requirements`.
+Read ticket. Run `/post-intake` `{"epic_key"}`. Extract any pre-filled values from the ticket description and store in metadata `requirements`.
 
 ### `onboarding:requirements-gathering`
 
@@ -108,15 +108,17 @@ Store all requirements in metadata.
 
 Wait for: "approved", "lgtm", "looks good", "go ahead", "proceed".
 
-Post:
+Post (adapt fork account for dedicated infra teams who provide their own):
 ```
 ## [Phase 1/3] Instance Setup — Action Required: Create Repo
 
-1. **Create GitHub repo**: Org: <org>, Name: `<instance_name>`, Public
-2. **Grant bot access** — add `platex-rehor-bot` (Write role)
+- [ ] **Create GitHub repo**: Org: <team's org>, Name: `<instance_name>`, Public
+- [ ] **Grant bot access** — add `<fork_account>` (Write role)
+- [ ] **Default branch** — confirm if `main` or `master` (I'll default to `main`)
 
 Reply with repo URL once done.
 ```
+Use `platex-rehor-bot` for shared infra, or the team's own fork account for dedicated infra.
 
 Apply `onboarding:repo-requested`.
 
@@ -156,7 +158,7 @@ Post MR link. Apply `onboarding:konflux-mr`. Store Konflux info in metadata.
 
 ### `onboarding:konflux-mr`
 
-When MR merged: `/post-konflux-instructions` `{"epic_key", "component_name", "quay_org", "instance_name"}`. Apply `onboarding:tekton-setup`.
+When MR merged: `/post-konflux-instructions` `{"epic_key", "instance_name", "quay_org"}`. Apply `onboarding:tekton-setup`.
 
 ---
 
@@ -167,15 +169,29 @@ When MR merged: `/post-konflux-instructions` `{"epic_key", "component_name", "qu
 Wait for: pipelines merged, build ran, Quay image exists.
 
 1. Phase 2 sub-ticket → Done, Phase 3 → In Progress
-2. `/post-deployment-confirmation` `{"epic_key", "quay_org", "instance_name", "instance_repo_url", "config_name", "pattern"}`
+2. Gather deployment details:
+   - **Shared infra**: post a comment indicating the MR will use shared infrastructure values (GCP project, namespace, etc.) discovered from the existing deploy.yml. Do NOT post the actual values — they may contain sensitive infrastructure details.
+   - **Dedicated infra (separate pattern)**: before gathering deployment fields, confirm the team has completed the prerequisite service tree setup with app-sre. Post a checkpoint comment:
+     ```
+     Before we generate the deployment MR, please confirm:
+     - [ ] Your app-interface service tree has been set up with app-sre (app.yml, namespace, pipeline provider)
+     ```
+     Wait for confirmation before proceeding. Then gather:
+     - `gcp_project_id` — required, no default (e.g., `my-team-gcp-project`)
+     - `gcp_region` — default: `global`
+     - `service_tree` — required. Path under `data/services/` where the team's app-interface service lives (e.g., `insights/my-team`). The team must have worked with app-sre to create this first.
+     - `app_ref` — `$ref` to the team's app.yml (default: shared, but likely wrong for separate)
+     - `namespace_ref` — `$ref` to the team's namespace YAML. Do NOT rely on the shared deploy.yml fallback if the team has their own namespace.
+     - `pipelines_ref` — `$ref` to pipeline provider (default: shared)
+3. Clone app-interface fork → discover infrastructure values at generation time → `/generate-app-interface` → commit → push → open MR. The generator also adds a `codeComponents` entry to `app.yml` for the instance repo (if not already present).
 
-Once confirmed: clone app-interface fork → `/generate-app-interface` → commit → push → open MR.
+The MR itself is the confirmation — the team reviews the diff and can request changes. No separate confirmation comment needed.
 
 Post MR link. Apply `onboarding:app-interface-mr`. Update metadata: `phase: 3`.
 
 ### `onboarding:app-interface-mr`
 
-When MR merged: `/post-manual-steps` `{"epic_key", "bot_label"}`.
+When MR merged: `/post-manual-steps` `{"epic_key", "bot_label", "instance_name", "dedicated_proxy", "workflow"}`.
 
 ### `onboarding:manual-steps`
 
@@ -191,11 +207,41 @@ Post completion msg. Phase 3 sub-ticket → Done. Epic → Done/Release Pending.
 
 ## Decision Branches
 
-**GitHub vs GitLab targets**: `github.com` → `gh`, fork to `platex-rehor-bot` | `gitlab.cee.redhat.com` → `glab --hostname`, fork to `platform-experience-services-bot`
+### Shared vs Dedicated Infrastructure
 
-**Org**: RedHatInsights → shared SaaS (Pattern A) | External → separate SaaS (Pattern B)
+Determine early (Phase 1 intake) whether the team uses shared Rehor infrastructure or needs dedicated setup. Key question: does the team need separate Jira/GitHub/GitLab credentials, or can they use the shared fork accounts?
 
-**Konflux tenant**: New → `/generate-konflux` `new_tenant: true` | Existing → `new_tenant: false`
+> **Terminology**: "fork account" = the GitHub/GitLab service account the bot uses to fork repos and open PRs/MRs (e.g., `platex-rehor-bot`). Team-facing text (intake, plan) calls these "bot accounts" since that's the team's mental model.
+
+**Shared** (most teams — works across orgs, e.g., `RedHatInsights`, `project-kessel`):
+Uses the shared proxy, memory server, GitHub/GitLab fork accounts, namespace, and GCP project.
+- SaaS pattern: prefer a new `<instance>-deploy.yml` in the `platform-frontend-ai-dev` service tree. Main `deploy.yml` is reserved for platform instances, memory-server, and proxy — fallback only.
+- Konflux tenant: may be existing or new
+- GCP project: uses the shared project (discovered from `SHARED_SAAS_PATH`)
+- Proxy: shared `devbot-proxy` in same namespace
+- Fork accounts: `platex-rehor-bot` (GitHub), `platform-experience-services-bot` (GitLab)
+
+**Dedicated** (teams needing separate credentials):
+- SaaS pattern: `separate` — new service tree in app-interface (not under `insights/platform-frontend-ai-dev`). Requires `service_tree` (e.g., `<platform>/<team>`) — ask the team where their service lives in app-interface. The onboarding bot can generate the SaaS deploy file once the service tree exists, but cannot yet bootstrap the full app-interface service structure (app.yml, namespace, pipeline provider). The team must work with the app-interface / app-sre team to set that up first.
+- Konflux tenant: almost always new
+- GCP project: team must provide their own (surface this early in Phase 1)
+- Proxy: dedicated proxy required — instruct team to create a ticket in the **REHOR** Jira project so the Rehor team can collaborate on setup
+- Fork accounts: required, no default — team must provide their own GitHub/GitLab fork accounts
+- Cost center: required, no default
+
+Surface GCP project, dedicated proxy, and fork account requirements in Phase 1 intake for dedicated teams — don't wait until Phase 3.
+
+### GitHub vs GitLab targets
+
+`github.com` → `gh`, fork to `platex-rehor-bot` (or team's account) | `gitlab.cee.redhat.com` → `glab --hostname`, fork to `platform-experience-services-bot` (or team's account)
+
+### SaaS pattern
+
+`shared` (Pattern A) — new `<instance>-deploy.yml` in the `platform-frontend-ai-dev` service tree. Prefer this over appending to the main `deploy.yml`, which is reserved for platform instances, memory-server, and proxy (fallback only). | `separate` (Pattern B) — entirely new service tree outside `platform-frontend-ai-dev`. Own memory server, proxy deploy, and bot instance deploy. Independent of shared/dedicated infra choice. Check app-interface or ask the team.
+
+### Konflux tenant
+
+New → `/generate-konflux` `new_tenant: true` (requires `cost_center`) | Existing → `new_tenant: false`
 
 ---
 
@@ -208,14 +254,49 @@ Epic's `onboarding:*` label = authoritative step indicator. Bot applies one labe
 ### Task Metadata
 
 ```json
-{"phase":1,"step":"intake","epic_key":"PROJ-123","phase_tickets":{"phase1":"...","phase2":"...","phase3":"..."},"requirements":{"team_name":"","instance_name":"","config_name":"","repos":[],"workflow":"jira-sprint","bot_label":"rehor-ai-...","tech_stacks":{}},"konflux":{"quay_org":"","tenant":"","cluster":"kflux-prd-rh02","admins":[],"maintainers":[],"cost_center":"","quota_tier":"1.small"},"prs":{},"mrs":{},"last_addressed":""}
+{"phase":1,"step":"intake","epic_key":"PROJ-123","phase_tickets":{"phase1":"...","phase2":"...","phase3":"..."},"requirements":{"team_name":"","instance_name":"","config_name":"","repo_url":"","github_org":"","repos":[],"workflow":"jira-sprint","bot_name":"devbot-...","bot_label":"rehor-ai-...","instance_id":"","board_name":"","sprint_prefix":"","include_backlog":"false","board_id":"","jira_project":"","envs":[],"personas":[],"tech_stacks":[],"pattern":"shared","dedicated_proxy":false,"fork_account":"","slack_webhook_url":"","slack_notify_mode":""},"konflux":{"quay_org":"","tenant":"","cluster":"kflux-prd-rh02","new_tenant":true,"admins":[],"maintainers":[],"cost_center":"","quota_tier":"1.small"},"deployment":{"gcp_project_id":"","gcp_region":"global","target_branch":"main","config_repo":"","config_path":"","service_tree":"","app_ref":"","namespace_ref":"","pipelines_ref":"","auth_ref":""},"prs":[],"mrs":[],"last_addressed":""}
 ```
 
 - `step` matches label suffix
 - `last_addressed` — update every time feedback addressed
+- `pattern` and `dedicated_proxy` — set during Phase 1 requirements gathering
+- `fork_account` — set during Phase 1 requirements gathering. Team-provided for dedicated infra; empty for shared (uses defaults)
+- `deployment.gcp_project_id` — team-provided for dedicated infra only. For shared, discovered at generation time from `SHARED_SAAS_PATH` — do not cache.
+- `deployment.service_tree`, `app_ref`, `namespace_ref`, `pipelines_ref` — only for separate pattern. Team-provided or coordinated with app-sre.
+- `prs`/`mrs` — arrays of `{"repo": "...", "number": N, "host": "github|gitlab"}`
 
 **Resume**: `task_get(external_key)` → read metadata → cross-check metadata `step` vs epic label.
 **End cycle**: `task_update` w/ updated metadata.
+
+## Canonical Field Names
+
+All skills MUST use these field names. No aliases.
+
+| Canonical | Used in | Meaning |
+|-----------|---------|---------|
+| `instance_name` | all skills | Name of the bot instance (repo name, Konflux component, deploy param) |
+| `repo_url` | generate-konflux, generate-app-interface, detect-tech-stack | Full HTTPS URL of instance repo |
+| `target_branch` | generate-konflux, generate-app-interface, detect-tech-stack | Default branch of instance repo (`main` or `master`) |
+| `envs` | detect-tech-stack, generate-instance, post-plan | Runtime environments needed (`node`, `browser`, etc.) |
+| `personas` | detect-tech-stack, generate-instance, post-plan | Detected personas from repo analysis |
+| `epic_key` | all Jira-posting skills | Jira epic key (e.g., `RHCLOUD-12345`) |
+| `quay_org` | generate-konflux, generate-app-interface, post-konflux-instructions | Quay org for image push |
+| `tenant` | generate-konflux | Konflux tenant namespace name |
+| `config_name` | generate-instance, generate-app-interface | Config directory name under `instance/` |
+| `config_repo` | generate-app-interface | Repo URL for `BOT_CONFIG_PATH` source (defaults to `repo_url`) |
+| `config_path` | generate-app-interface | Path within config_repo to config dir |
+| `pattern` | generate-app-interface | SaaS file pattern: `shared` or `separate` |
+| `gcp_project_id` | generate-app-interface | GCP project for Vertex AI |
+| `gcp_region` | generate-app-interface | GCP region (default: `global`) |
+| `bot_name` | generate-instance, generate-app-interface | OpenShift deployment name |
+| `bot_label` | generate-instance, generate-app-interface, post-manual-steps | Jira label the bot filters on |
+| `dedicated_proxy` | post-plan, post-manual-steps | Whether team needs own proxy (dedicated infra) |
+| `service_tree` | generate-app-interface | Path under `data/services/` for separate pattern (e.g., `my-platform/my-team`). Required for `separate`, not used for `shared`. |
+| `app_ref` | generate-app-interface | `$ref` to app.yml (default: shared service tree). Override for separate pattern. |
+| `namespace_ref` | generate-app-interface | `$ref` to namespace YAML. Discovered from shared deploy.yml if not provided. |
+| `pipelines_ref` | generate-app-interface | `$ref` to pipeline provider. Override for separate pattern. |
+
+**Retired aliases** (do NOT use): `source_url`, `default_branch`, `app_name`, `component_name`, `suggested_envs`, `suggested_personas`, `instance_repo_url`.
 
 ## Rules
 
@@ -228,3 +309,34 @@ Epic's `onboarding:*` label = authoritative step indicator. Bot applies one labe
 - PR/MR descriptions: link Jira ticket + summary
 - After completion: `memory_store` category `learning` tags `onboarding`
 - Use runtime env vars: `GH_USER_NAME`, `BOT_JIRA_EMAIL`, `BOT_CONFIG_PATH`
+
+---
+
+## Known Limitations / V2
+
+Things the onboarding workflow cannot yet handle for dedicated-infra teams (outside shared infrastructure). If a team hits one of these, coordinate manually with the Rehor platform team.
+
+### Dedicated proxy deployment
+
+`deploy-template.yaml.j2` hardcodes ~15 service references to shared infrastructure: `devbot-proxy` (ports 3128, 8443, 8444, 8446, 9090), `devbot-memory-server` (port 8080), and `devbot-secrets`. These are string literals in the Jinja2 template, not OpenShift template parameters. A team needing separate credentials (different Jira/GitHub/GitLab accounts) requires a dedicated proxy, which means either:
+- Parameterizing the deploy template to accept proxy/memory-server/secret names
+- Creating a separate deploy template variant for dedicated-proxy deployments
+
+The NetworkPolicy also hardcodes pod label selectors for `devbot-proxy` and `memory-server`.
+
+### Arbitrary GitLab hosts
+
+`generate_instance.py` hardcodes `gitlab.cee.redhat.com` for GitLab fork URL construction. Teams using a different GitLab instance (e.g., `gitlab.com`) would get wrong fork URLs in `project-repos.json`, causing git-clone failures at runtime.
+
+### Separate namespace / app-interface service
+
+The `separate` SaaS pattern requires `service_tree` and supports `app_ref`, `namespace_ref`, `pipelines_ref` overrides. However, it cannot bootstrap the service tree itself. For a team that needs their own namespace on a different cluster, the following must be created manually (with app-sre):
+- A new `app.yml` in app-interface
+- A new namespace YAML under the team's service tree
+- A new pipeline provider definition
+
+**`namespace_ref` fallback risk**: if `namespace_ref` is not explicitly provided, the generator falls back to discovering it from the shared `deploy.yml`. For a team on a different cluster/namespace, this fallback gives the wrong namespace. Always require `namespace_ref` for separate pattern teams on their own namespace — do not rely on the fallback.
+
+### Arbitrary Konflux clusters
+
+`generate_konflux.py` discovers cluster FQDN suffixes at runtime from the `config/` directory in the cloned `konflux-release-data` repo. A cluster that doesn't have an existing `config/<cluster>.*` directory will raise a `ValueError` with the list of available clusters.

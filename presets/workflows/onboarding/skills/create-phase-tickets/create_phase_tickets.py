@@ -16,6 +16,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from jira_mcp import jira_call, jira_cleanup
+from onboarding_helpers import apply_label
 
 PHASES = [
     {"key": "phase1", "summary": "[Phase 1] Instance Setup"},
@@ -55,34 +56,6 @@ def create_tickets(epic_key, project_key, team_name):
     return phase_tickets
 
 
-def add_label(epic_key, label):
-    result = jira_call(
-        "jira_get_issue",
-        {"issue_key": epic_key, "fields": "labels"},
-    )
-    if not result:
-        print(f"WARNING: Could not read labels on {epic_key}", file=sys.stderr)
-        return False
-
-    existing = result.get("labels", [])
-    if label in existing:
-        return True
-
-    updated = existing + [label]
-    update_result = jira_call(
-        "jira_update_issue",
-        {
-            "issue_key": epic_key,
-            "fields": json.dumps({"labels": updated}),
-        },
-    )
-    if not update_result:
-        print(f"WARNING: Could not apply label {label} to {epic_key}", file=sys.stderr)
-        return False
-
-    return True
-
-
 def main():
     if len(sys.argv) < 2:
         print("Usage: create_phase_tickets.py '<json_config>'", file=sys.stderr)
@@ -107,12 +80,14 @@ def main():
         if not phase_tickets:
             sys.exit(1)
 
-        label_ok = add_label(epic_key, INITIAL_LABEL)
+        if not apply_label(epic_key, INITIAL_LABEL):
+            print("ERROR: Failed to apply label", file=sys.stderr)
+            sys.exit(1)
 
         output = {
             "epic_key": epic_key,
             "phase_tickets": phase_tickets,
-            "label_applied": INITIAL_LABEL if label_ok else None,
+            "label_applied": INITIAL_LABEL,
         }
         print(json.dumps(output, indent=2))
     finally:

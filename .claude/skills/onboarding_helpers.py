@@ -21,7 +21,7 @@ def apply_label(epic_key, new_label):
         print(f"WARNING: Could not read labels on {epic_key}", file=sys.stderr)
         return False
 
-    existing = result.get("labels", [])
+    existing = result.get("labels") or result.get("fields", {}).get("labels") or []
     updated = [lbl for lbl in existing if not lbl.startswith("onboarding:")]
     updated.append(new_label)
 

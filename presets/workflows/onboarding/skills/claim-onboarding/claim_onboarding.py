@@ -9,13 +9,11 @@ import json
 import os
 import sys
 
-import httpx
-
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "create-phase-tickets"))
-from create_phase_tickets import add_label as _add_label
 from create_phase_tickets import create_tickets
 from jira_mcp import jira_call, jira_cleanup
+from onboarding_helpers import apply_label
 
 BOT_JIRA_EMAIL = os.environ.get("BOT_JIRA_EMAIL", "")
 BOT_MEMORY_URL = os.environ.get("BOT_MEMORY_URL", "")
@@ -75,6 +73,8 @@ def _create_task(epic_key, summary, phase_tickets):
         },
     }
     try:
+        import httpx
+
         with httpx.Client(timeout=30.0) as client:
             resp = client.post(f"{BOT_MEMORY_URL}/tasks", json=payload)
             if resp.status_code in (200, 201):
@@ -118,7 +118,9 @@ def main():
             print("ERROR: Failed to create phase tickets", file=sys.stderr)
             sys.exit(1)
 
-        _add_label(epic_key, "onboarding:intake")
+        if not apply_label(epic_key, "onboarding:intake"):
+            print("ERROR: Failed to apply onboarding:intake label", file=sys.stderr)
+            sys.exit(1)
 
         task_ok = _create_task(epic_key, summary, phase_tickets)
 

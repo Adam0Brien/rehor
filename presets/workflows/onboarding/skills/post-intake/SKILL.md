@@ -20,11 +20,8 @@ python3 .claude/skills/post-intake/post_intake.py '<json_config>' 2>&1
 
 ```json
 {
-  "epic_key": "RHCLOUD-12345",
-  "prefilled": {
-    "team_name": "already known from ticket"
-  }
+  "epic_key": "RHCLOUD-12345"
 }
 ```
 
-Posts the intake questions, skipping any pre-filled fields. Applies `onboarding:requirements-gathering` label.
+Posts the intake questions. Applies `onboarding:requirements-gathering` label.

@@ -15,6 +15,7 @@ from pathlib import Path
 
 _SAFE_NAME = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")
 
+
 def _discover_cluster_suffix(cluster, repo_path):
     config_dir = Path(repo_path) / "config"
     if not config_dir.is_dir():
@@ -23,7 +24,12 @@ def _discover_cluster_suffix(cluster, repo_path):
     if len(matches) == 1:
         return matches[0]
     if len(matches) > 1:
-        return sorted(matches)[0]
+        picked = sorted(matches)[0]
+        print(
+            f"WARNING: Multiple cluster suffixes found for '{cluster}': {sorted(matches)}. Using '{picked}'.",
+            file=sys.stderr,
+        )
+        return picked
     raise ValueError(
         f"No cluster suffix found for '{cluster}' in {config_dir}. "
         f"Available: {sorted(d.name for d in config_dir.iterdir() if d.is_dir() and '.' in d.name)}"
@@ -49,9 +55,7 @@ def _discover_service_account(repo_path, cluster_suffix):
             match = re.search(r"serviceAccountName:\s*(\S+)", content)
             if match:
                 return match.group(1)
-    raise ValueError(
-        f"No existing ReleasePlanAdmission files found in {config_dir} to discover service account name"
-    )
+    raise ValueError(f"No existing ReleasePlanAdmission files found in {config_dir} to discover service account name")
 
 
 def _ns_yaml(tenant, cost_center):
@@ -236,6 +240,7 @@ def _app_kustomization(tenant, instance_name):
         "resources:\n"
         "  - application.yaml\n"
         "  - release-plan.yaml\n"
+        "  - integration-test-scenario.yaml\n"
         f"  - {instance_name}/component.yaml\n"
         f"  - {instance_name}/image-repository.yaml\n"
     )
@@ -292,12 +297,15 @@ def _rpa_yaml(service_name, instance_name, tenant, quay_org, service_account):
     )
 
 
-def _constraints_yaml(service_name, tenant, quay_org, service_account):
+def _constraints_yaml(service_name, tenant, quay_org, service_account, instance_name=None):
     tenant_re = re.escape(tenant)
     quay_org_re = re.escape(quay_org)
-    service_re = re.escape(service_name)
+    instance_re = re.escape(instance_name or service_name)
     sa_base = re.sub(r"-(staging|prod)$", "", service_account)
-    sa_pattern = f"{re.escape(sa_base)}-((staging)|(prod))"
+    if sa_base == service_account:
+        sa_pattern = re.escape(service_account)
+    else:
+        sa_pattern = f"{re.escape(sa_base)}-((staging)|(prod))"
     return (
         "---\n"
         "properties:\n"
@@ -322,7 +330,7 @@ def _constraints_yaml(service_name, tenant, quay_org, service_account):
         "                        properties:\n"
         "                          url:\n"
         "                            type: string\n"
-        f"                            pattern: ^quay\\.io/redhat-services-prod/{quay_org_re}/{service_re}.*\n"
+        f"                            pattern: ^quay\\.io/redhat-services-prod/{quay_org_re}/{instance_re}.*\n"
         "      pipeline:\n"
         "        properties:\n"
         "          pipelineRef:\n"
@@ -371,7 +379,7 @@ def _update_codeowners(repo_path, tenant, cluster, cluster_suffix, service_name)
 
     for entry in new_entries:
         path_prefix = entry.split()[0]
-        if not any(path_prefix in line for line in existing_lines):
+        if not any(line.startswith(path_prefix) for line in existing_lines):
             existing_lines.append(entry)
 
     existing_lines.sort()
@@ -464,22 +472,29 @@ def generate(cfg, repo_path):
 
         (app_dir / "application.yaml").write_text(_application_yaml(instance_name))
         (app_dir / "release-plan.yaml").write_text(_release_plan_yaml(instance_name))
+        (app_dir / "integration-test-scenario.yaml").write_text(_integration_test_yaml(instance_name))
         (app_dir / "kustomization.yaml").write_text(_app_kustomization(tenant, instance_name))
-        (comp_dir / "component.yaml").write_text(
-            _component_yaml(instance_name, repo_url, dockerfile, target_branch)
-        )
-        (comp_dir / "image-repository.yaml").write_text(
-            _image_repository_yaml(instance_name, quay_org)
+        (comp_dir / "component.yaml").write_text(_component_yaml(instance_name, repo_url, dockerfile, target_branch))
+        (comp_dir / "image-repository.yaml").write_text(_image_repository_yaml(instance_name, quay_org))
+        files_written.extend(
+            [
+                str((app_dir / f).relative_to(root))
+                for f in [
+                    "application.yaml",
+                    "release-plan.yaml",
+                    "integration-test-scenario.yaml",
+                    "kustomization.yaml",
+                ]
+            ]
         )
         files_written.extend(
-            [str((app_dir / f).relative_to(root)) for f in [
-                "application.yaml", "release-plan.yaml", "kustomization.yaml",
-            ]]
-        )
-        files_written.extend(
-            [str((comp_dir / f).relative_to(root)) for f in [
-                "component.yaml", "image-repository.yaml",
-            ]]
+            [
+                str((comp_dir / f).relative_to(root))
+                for f in [
+                    "component.yaml",
+                    "image-repository.yaml",
+                ]
+            ]
         )
     else:
         combined = _application_yaml(instance_name, tenant) + _component_yaml(
@@ -492,25 +507,32 @@ def generate(cfg, repo_path):
             f"{instance_name}.enterprise-contract.integrationtestscenario.yaml",
         ]
         (tenant_dir / new_files[0]).write_text(combined)
-        (tenant_dir / new_files[1]).write_text(
-            _image_repository_yaml(instance_name, quay_org, tenant)
-        )
-        (tenant_dir / new_files[2]).write_text(
-            _release_plan_yaml(instance_name, tenant)
-        )
-        (tenant_dir / new_files[3]).write_text(
-            _integration_test_yaml(instance_name, tenant)
-        )
-        files_written.extend(
-            [str((tenant_dir / f).relative_to(root)) for f in new_files]
-        )
+        (tenant_dir / new_files[1]).write_text(_image_repository_yaml(instance_name, quay_org, tenant))
+        (tenant_dir / new_files[2]).write_text(_release_plan_yaml(instance_name, tenant))
+        (tenant_dir / new_files[3]).write_text(_integration_test_yaml(instance_name, tenant))
+        files_written.extend([str((tenant_dir / f).relative_to(root)) for f in new_files])
 
         kustom_path = tenant_dir / "kustomization.yaml"
         if kustom_path.exists():
             kustom_content = kustom_path.read_text()
             for f in new_files:
                 if f not in kustom_content:
-                    kustom_content = kustom_content.rstrip("\n") + f"\n  - {f}\n"
+                    lines = kustom_content.splitlines(keepends=True)
+                    insert_idx = len(lines)
+                    in_resources = False
+                    for i, line in enumerate(lines):
+                        stripped = line.rstrip()
+                        if stripped == "resources:" or stripped.startswith("resources:"):
+                            in_resources = True
+                            continue
+                        if in_resources:
+                            if stripped.startswith("  - ") or stripped == "":
+                                insert_idx = i + 1
+                            else:
+                                insert_idx = i
+                                break
+                    lines.insert(insert_idx, f"  - {f}\n")
+                    kustom_content = "".join(lines)
             kustom_path.write_text(kustom_content)
             files_written.append(str(kustom_path.relative_to(root)))
 
@@ -525,7 +547,7 @@ def generate(cfg, repo_path):
         constraints_dir = root / "constraints" / "service"
         constraints_dir.mkdir(parents=True, exist_ok=True)
         (constraints_dir / f"{service_name}.yaml").write_text(
-            _constraints_yaml(service_name, tenant, quay_org, service_account)
+            _constraints_yaml(service_name, tenant, quay_org, service_account, instance_name)
         )
         files_written.append(str((constraints_dir / f"{service_name}.yaml").relative_to(root)))
 

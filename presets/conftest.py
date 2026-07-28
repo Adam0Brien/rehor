@@ -24,6 +24,11 @@ skill_dirs = [
     repo_root / "presets" / "workflows" / "onboarding" / "skills" / "generate-instance",
     repo_root / "presets" / "workflows" / "onboarding" / "skills" / "generate-konflux",
     repo_root / "presets" / "workflows" / "onboarding" / "skills" / "generate-app-interface",
+    repo_root / "presets" / "workflows" / "onboarding" / "skills" / "post-plan",
+    repo_root / "presets" / "workflows" / "onboarding" / "skills" / "post-manual-steps",
+    repo_root / "presets" / "workflows" / "onboarding" / "skills" / "post-konflux-questions",
+    repo_root / "presets" / "workflows" / "onboarding" / "skills" / "post-konflux-instructions",
+    repo_root / "presets" / "workflows" / "onboarding" / "skills" / "post-intake",
 ]
 
 for skill_path in skill_dirs:

@@ -27,38 +27,40 @@ Welcome! I'll be helping you set up your Rehor bot instance. This is a 3-phase p
 To get started, I need some details about your instance:
 
 ### Required
-- [ ] **Instance name** — pick something memorable! This becomes your repo name \
+- **Instance name** — pick something memorable! This becomes your repo name \
 (`<name>-agent-dev`), bot label, and identity. Examples: *phoenix*, *herald*, \
 *ziggy*, *arclight*. Doesn't have to be your team name.
-- [ ] **Team name** — your team's display name (for docs and Jira comments)
-- [ ] **GitHub org** — the org that will own your instance repo (e.g., `RedHatInsights`, `project-kessel`)
-- [ ] **Target repo URL(s)** — the repo(s) your bot will work on (GitHub and/or GitLab)
-- [ ] **Jira project key** — the project your bot will pick up tickets from
+- **Team name** — your team's display name (for docs and Jira comments)
+- **GitHub org** — the org that will own your instance repo (e.g., `RedHatInsights`, `project-kessel`)
+- **Target repo URL(s)** — the repo(s) your bot will work on (GitHub and/or GitLab)
+- **Jira project key** — the project your bot will pick up tickets from
+- **Infrastructure: shared or dedicated?** — most teams use the shared Rehor infrastructure: \
+shared proxy, memory server, GitHub/GitLab bot accounts, namespace, and GCP project. This \
+works across orgs (e.g., `RedHatInsights`, `project-kessel`). You only need **dedicated \
+infrastructure** if your team requires separate Jira/GitHub/GitLab credentials — that means \
+your own proxy, memory server, and bot accounts. Let us know so we can plan \
+accordingly. (Default: shared)
 
 ### Optional (defaults applied if not specified)
-- [ ] Workflow type — default: `jira-sprint` (also available: `jira-kanban`)
-- [ ] Default branch — default: `main` (let us know if your org uses `master` or another branch)
-- [ ] KEDA schedule — default: weekdays 9am–6pm ET
-- [ ] Board name / sprint prefix — only if using sprint workflow
-- [ ] Board ID / Jira project key — only if using kanban workflow
-- [ ] Custom fork accounts — default: `platex-rehor-bot` (GitHub), \
-`platform-experience-services-bot` (GitLab). Let us know if your team uses different accounts.
-- [ ] Slack notifications — provide a Slack webhook URL if you want the bot to post status updates to a channel
-
-### Infrastructure
-- [ ] **Shared or fresh?** — most teams use shared Rehor infrastructure (shared proxy, \
-shared namespace, shared GCP project). If your team is outside `RedHatInsights` or needs \
-separate Jira/GitHub/GitLab credentials, you'll need **fresh infrastructure** — let us know \
-so we can plan accordingly. (Default: shared)
+- Workflow type — default: `jira-sprint` (also available: `jira-kanban`)
+- Default branch — default: `main` (let us know if your org uses `master` or another branch)
+- KEDA schedule — default: weekdays 9am–6pm ET
+- Board name / sprint prefix — only if using sprint workflow
+- Board ID / Jira project key — only if using kanban workflow
+- Fork accounts — default: `platex-rehor-bot` (GitHub), \
+`platform-experience-services-bot` (GitLab). Dedicated infrastructure teams must provide \
+their own bot accounts.
+- Slack notifications — provide a Slack webhook URL if you want the bot to post status updates to a channel
 
 ### Heads up for Phase 2 & 3
 These aren't needed yet, but good to start thinking about:
 - **Konflux tenant** — do you have an existing Konflux tenant namespace, or will we create one?
 - **GCP project** — a GCP project with Vertex AI API enabled is required for deployment. \
 If you're using shared infrastructure, the existing project covers you. \
-If fresh, you'll need your own — start the request early if needed.
-- **Dedicated proxy** — fresh infrastructure requires a dedicated proxy deployment for your \
-credentials. This is set up by the Rehor team but adds lead time.
+If dedicated, you'll need your own — start the request early if needed.
+- **Dedicated proxy** — dedicated infrastructure requires a dedicated proxy deployment for your \
+credentials. Create a ticket in the **REHOR** Jira project so the Rehor team can collaborate \
+on setup — this adds lead time, so start early.
 
 Please provide these details and I'll put together an onboarding plan for your approval.
 """
@@ -85,7 +87,8 @@ def main():
         if not ok:
             sys.exit(1)
 
-        apply_label(epic_key, LABEL)
+        if not apply_label(epic_key, LABEL):
+            sys.exit(1)
 
         print(json.dumps({"epic_key": epic_key, "label": LABEL, "posted": True}))
     finally:

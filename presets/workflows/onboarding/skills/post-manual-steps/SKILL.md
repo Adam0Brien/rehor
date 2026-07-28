@@ -23,6 +23,7 @@ python3 .claude/skills/post-manual-steps/post_manual_steps.py '<json_config>' 2>
   "epic_key": "RHCLOUD-12345",
   "bot_label": "rehor-ai-myteam",
   "instance_name": "my-team-agent-dev",
-  "dedicated_proxy": false
+  "dedicated_proxy": false,
+  "workflow": "jira-sprint"
 }
 ```

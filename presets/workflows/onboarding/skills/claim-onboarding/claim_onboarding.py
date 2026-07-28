@@ -74,6 +74,7 @@ def _create_task(epic_key, summary, phase_tickets):
     }
     try:
         import httpx
+
         with httpx.Client(timeout=30.0) as client:
             resp = client.post(f"{BOT_MEMORY_URL}/tasks", json=payload)
             if resp.status_code in (200, 201):
@@ -117,7 +118,9 @@ def main():
             print("ERROR: Failed to create phase tickets", file=sys.stderr)
             sys.exit(1)
 
-        apply_label(epic_key, "onboarding:intake")
+        if not apply_label(epic_key, "onboarding:intake"):
+            print("ERROR: Failed to apply onboarding:intake label", file=sys.stderr)
+            sys.exit(1)
 
         task_ok = _create_task(epic_key, summary, phase_tickets)
 

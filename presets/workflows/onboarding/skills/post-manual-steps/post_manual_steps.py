@@ -19,28 +19,50 @@ LABEL = "onboarding:manual-steps"
 def _build_comment(config):
     bot_label = config.get("bot_label", "<bot_label>")
     instance_name = config.get("instance_name", "<instance_name>")
+    workflow = config.get("workflow", "jira-sprint")
     dedicated_proxy = config.get("dedicated_proxy", False)
 
     credentials_step = (
-        "- [ ] **Credentials** — your team is using a dedicated proxy. "
+        "\n- [ ] **Credentials** — your team is using a dedicated proxy. "
         "Coordinate with the Rehor team to configure your proxy deployment "
         "with the correct Jira/GitHub/GitLab credentials."
         if dedicated_proxy
-        else "- [ ] **Credentials** — using shared bot accounts (default). "
-        "If you need separate Jira/GitHub/GitLab credentials, let the Rehor team know — "
-        "this requires a dedicated proxy deployment."
+        else ""
     )
+
+    if workflow == "jira-sprint":
+        test_step = (
+            f"- [ ] **Test the bot** — pick a Jira ticket in an **active sprint** "
+            f"(not a future one) and:\n"
+            f"  - Add the label `{bot_label}`\n"
+            f"  - Add a label `repo:<repo_name>` matching an entry in your `project-repos.json`\n"
+            f"  - Make sure **no one is assigned** to the ticket — the bot skips assigned tickets"
+        )
+    else:
+        test_step = (
+            f"- [ ] **Test the bot** — pick a Jira ticket and:\n"
+            f"  - Add the label `{bot_label}`\n"
+            f"  - Add a label `repo:<repo_name>` matching an entry in your `project-repos.json`\n"
+            f"  - Make sure **no one is assigned** to the ticket — the bot skips assigned tickets"
+        )
 
     return f"""\
 ## [Phase 3/3] Deployment — Final Steps
 
 The deployment MR is merged. Almost there! A few manual steps remain:
 
-- [ ] **Verify deployment** — confirm the `{instance_name}` pod is running in the target cluster
-- [ ] **Create Jira label** — first ticket with label `{bot_label}` creates it implicitly, or create manually
+- [ ] **Verify deployment** — confirm the `{instance_name}` deployment shows up on the target cluster in the namespace\
 {credentials_step}
+{test_step}
 
-Please reply "done" for each step as you complete it, or ask questions if stuck.
+Reply here once verified and I'll close out the epic. Welcome to Rehor!
+
+### What's next?
+- **Docs** — check out the [Rehor docs](https://github.com/OpenShift-Fleet/rehor/tree/master/docs) \
+for future roadmap, how to add custom workflows, and more!
+- **Feedback** — the Rehor team is always looking for feedback and suggestions. \
+Please create tickets in the **REHOR** Jira project documenting your experience \
+and any ideas for improvement!
 """
 
 
@@ -66,7 +88,8 @@ def main():
         if not ok:
             sys.exit(1)
 
-        apply_label(epic_key, LABEL)
+        if not apply_label(epic_key, LABEL):
+            sys.exit(1)
 
         print(json.dumps({"epic_key": epic_key, "label": LABEL, "posted": True}))
     finally:

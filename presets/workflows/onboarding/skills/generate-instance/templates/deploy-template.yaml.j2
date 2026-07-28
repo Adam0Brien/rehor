@@ -45,6 +45,8 @@ parameters:
   required: true
 - name: SLACK_WEBHOOK_URL
   value: ""
+- name: SLACK_NOTIFY_MODE
+  value: ""
 objects:
 
 # Bot-only deployment for << instance_name >> runner instance.
@@ -165,6 +167,8 @@ objects:
             value: http://devbot-memory-server:8080/api/costs
           - name: SLACK_WEBHOOK_URL
             value: ${SLACK_WEBHOOK_URL}
+          - name: SLACK_NOTIFY_MODE
+            value: ${SLACK_NOTIFY_MODE}
           - name: PROXY_HOST
             value: devbot-proxy
           - name: HTTP_PROXY

@@ -24,6 +24,7 @@ def _build_comment(config):
     workflow = config.get("workflow", "jira-sprint")
     repos = config.get("repos", [])
     envs_and_personas = config.get("envs_and_personas", "auto-detected")
+    dedicated_proxy = config.get("dedicated_proxy", False)
 
     tech_stacks = config.get("tech_stacks", [])
     stack_lines = []
@@ -51,6 +52,7 @@ def _build_comment(config):
         if isinstance(r, dict):
             return f"  - [{r.get('name', '?')}]({r.get('url', '')})"
         return f"  - {r}"
+
     repo_list = "\n".join(_fmt_repo(r) for r in repos) if repos else "  (none)"
 
     return f"""\
@@ -69,6 +71,11 @@ Based on our conversation, here's the plan:
 - **Detected stacks**:
 {stacks_str}
 - **Suggested presets**: {envs_and_personas}
+- **Infrastructure**: {
+        "dedicated — own proxy, memory server, and bot accounts"
+        if dedicated_proxy
+        else "shared — uses shared proxy, memory server, and bot accounts"
+    }
 {unsupported_warning}
 ### What I'll automate
 - Phase 1: Generate scaffolding files, open PR on your instance repo
@@ -79,7 +86,17 @@ Based on our conversation, here's the plan:
 - Phase 1: Create the GitHub repo, grant bot access, merge scaffolding PR
 - Phase 2: Merge Konflux MR, generate Tekton pipelines from UI, verify Quay image
 - Phase 3: Merge app-interface MR, verify deployment
-
+{
+        '''
+### Dedicated infrastructure — additional requirements
+- **Dedicated proxy** — create a ticket in the **REHOR** Jira project so the Rehor team can collaborate on setup
+- **Bot accounts** — your team must provide GitHub/GitLab bot accounts (shared defaults will not be used)
+- **GCP project** — you'll need your own GCP project with Vertex AI API enabled
+- **App-interface service tree** — work with app-sre to set up your service tree before Phase 3
+'''
+        if dedicated_proxy
+        else ""
+    }
 **Does this look good?** Reply "approved" or let me know what to change.
 """
 
@@ -106,7 +123,8 @@ def main():
         if not ok:
             sys.exit(1)
 
-        apply_label(epic_key, LABEL)
+        if not apply_label(epic_key, LABEL):
+            sys.exit(1)
 
         print(json.dumps({"epic_key": epic_key, "label": LABEL, "posted": True}))
     finally:

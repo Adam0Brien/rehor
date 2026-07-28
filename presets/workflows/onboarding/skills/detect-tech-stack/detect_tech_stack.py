@@ -134,8 +134,15 @@ def detect(repo_path):
         stack.append("tooling")
         personas.add("tooling")
 
-    yaml_count = len(list(root.glob("**/*.yaml"))) + len(list(root.glob("**/*.yml")))
-    total_files = sum(1 for _ in root.rglob("*") if _.is_file() and ".git" not in _.parts)
+    _skip = {".git", "node_modules", "vendor", "__pycache__"}
+
+    def _not_skipped(p):
+        return not (_skip & set(p.relative_to(root).parts))
+
+    yaml_count = sum(1 for p in root.glob("**/*.yaml") if _not_skipped(p)) + sum(
+        1 for p in root.glob("**/*.yml") if _not_skipped(p)
+    )
+    total_files = sum(1 for p in root.rglob("*") if p.is_file() and _not_skipped(p))
     if total_files > 0 and yaml_count / total_files > 0.5 and not has_app_code:
         stack.append("config")
         personas.add("config")

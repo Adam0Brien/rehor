@@ -18,29 +18,39 @@ LABEL = "onboarding:konflux-info"
 
 def _build_comment(config):
     team_name = config.get("team_name", "your team")
+    instance_name = config.get("instance_name", "<instance_name>")
     return f"""\
 ## [Phase 2/3] Konflux CI/CD — Getting Started
 
 Phase 1 is complete! Now let's set up Konflux CI/CD for your instance.
 
-I need a few details:
+Do you have an existing Konflux tenant, or should I create a new one? \
+Fill in **one** of the two sections below.
 
-1. **Existing Konflux tenant?** Do you already have a tenant namespace, or should I create a new one?
-   - If existing: what's the **tenant name** and **which cluster** is it on?
-   - If new: I'll derive a tenant name from your team name (you can override)
-2. **Quay org** — the Quay organization for your container images. \
-This is often the same as the tenant name, but doesn't have to be. \
-(e.g., `my-team-tenant` or `rh-platform-experien-tenant`)
-3. **Admin usernames** — SSO/Kerberos usernames for Konflux admin access (e.g., `jdoe`)
-4. **Maintainer usernames** — SSO/Kerberos usernames for maintainer access
-5. **Cost center** — your team's cost center (required for new tenants)
-6. **Quota tier** — default: `1.small` (options: `0.base` through `6.xxxlarge`)
+### Existing tenant — adding a component
 
-Defaults I'll use unless you say otherwise:
-- **Cluster**: `kflux-prd-rh02`
-- **Tenant name**: `<derived from {team_name}>`
-- **Quay org**: same as tenant name
-- **Dockerfile**: `dev-bot/Dockerfile.runner`
+**Required**
+- **Tenant name** — your existing tenant namespace
+
+**Optional** (defaults applied if not specified)
+- Cluster — default: `kflux-prd-rh02`
+- Quay org — default: same as tenant name. \
+Determines your image URL: `quay.io/redhat-services-prod/<quay_org>/{instance_name}`
+
+### New tenant — full setup
+
+**Required**
+- **Admin usernames** — SSO/Kerberos usernames for admin access (e.g., `jdoe`)
+- **Maintainer usernames** — SSO/Kerberos usernames for maintainer access
+- **Cost center** — your team's cost center
+
+**Optional** (defaults applied if not specified)
+- Tenant name — default: `<derived from {team_name}>`
+- Cluster — default: `kflux-prd-rh02`
+- Quay org — default: same as tenant name. \
+Determines your image URL: `quay.io/redhat-services-prod/<quay_org>/{instance_name}`
+- Quota tier — default: `1.small` (options: `0.base` through `6.xxxlarge`)
+- Dockerfile — default: `dev-bot/Dockerfile.runner`
 """
 
 
@@ -66,7 +76,8 @@ def main():
         if not ok:
             sys.exit(1)
 
-        apply_label(epic_key, LABEL)
+        if not apply_label(epic_key, LABEL):
+            sys.exit(1)
 
         print(json.dumps({"epic_key": epic_key, "label": LABEL, "posted": True}))
     finally:

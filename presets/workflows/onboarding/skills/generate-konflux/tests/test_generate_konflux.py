@@ -1,5 +1,6 @@
 import pytest
 from generate_konflux import (
+    _constraints_yaml,
     _discover_cluster_suffix,
     _discover_service_account,
     _validate_name,
@@ -82,6 +83,13 @@ class TestDiscovery:
         with pytest.raises(ValueError, match="No existing ReleasePlanAdmission"):
             _discover_service_account(tmp_path, "empty.xxxx.p1")
 
+    def test_cluster_suffix_multiple_warns(self, tmp_path, capsys):
+        (tmp_path / "config" / "multi.aaa.p1").mkdir(parents=True)
+        (tmp_path / "config" / "multi.zzz.p2").mkdir(parents=True)
+        result = _discover_cluster_suffix("multi", tmp_path)
+        assert result == "multi.aaa.p1"
+        assert "WARNING" in capsys.readouterr().err
+
 
 class TestValidation:
     def test_valid_name(self):
@@ -113,7 +121,13 @@ class TestNewTenant:
     def test_rbac_admins(self, konflux_repo):
         generate(NEW_TENANT_CONFIG, str(konflux_repo))
         admins_file = (
-            konflux_repo / "tenants-config" / "cluster" / "test-cluster" / "tenants" / "test-tenant" / "rbac-admins.yaml"
+            konflux_repo
+            / "tenants-config"
+            / "cluster"
+            / "test-cluster"
+            / "tenants"
+            / "test-tenant"
+            / "rbac-admins.yaml"
         )
         content = admins_file.read_text()
         assert "admin1" in content
@@ -169,6 +183,43 @@ class TestNewTenant:
         content = constraints_file.read_text()
         assert "test\\-sa-((staging)|(prod))" in content
 
+    def test_constraints_sa_pattern_no_suffix(self):
+        content = _constraints_yaml("svc", "tenant", "org", "my-release-sa")
+        assert "my\\-release\\-sa" in content
+        assert "((staging)|(prod))" not in content
+
+    def test_integration_test_scenario_created(self, konflux_repo):
+        generate(NEW_TENANT_CONFIG, str(konflux_repo))
+        its_file = (
+            konflux_repo
+            / "tenants-config"
+            / "cluster"
+            / "test-cluster"
+            / "tenants"
+            / "test-tenant"
+            / "test-agent-dev"
+            / "integration-test-scenario.yaml"
+        )
+        assert its_file.exists()
+        content = its_file.read_text()
+        assert "IntegrationTestScenario" in content
+        assert "test-agent-dev-enterprise-contract" in content
+
+    def test_kustomization_references_integration_test(self, konflux_repo):
+        generate(NEW_TENANT_CONFIG, str(konflux_repo))
+        kustom_file = (
+            konflux_repo
+            / "tenants-config"
+            / "cluster"
+            / "test-cluster"
+            / "tenants"
+            / "test-tenant"
+            / "test-agent-dev"
+            / "kustomization.yaml"
+        )
+        content = kustom_file.read_text()
+        assert "integration-test-scenario.yaml" in content
+
     def test_codeowners_updated(self, konflux_repo):
         generate(NEW_TENANT_CONFIG, str(konflux_repo))
         content = (konflux_repo / "CODEOWNERS").read_text()
@@ -199,7 +250,13 @@ class TestExistingTenant:
         generate(NEW_TENANT_CONFIG, str(konflux_repo))
         generate(EXISTING_TENANT_CONFIG, str(konflux_repo))
         kustom_file = (
-            konflux_repo / "tenants-config" / "cluster" / "test-cluster" / "tenants" / "test-tenant" / "kustomization.yaml"
+            konflux_repo
+            / "tenants-config"
+            / "cluster"
+            / "test-cluster"
+            / "tenants"
+            / "test-tenant"
+            / "kustomization.yaml"
         )
         content = kustom_file.read_text()
         assert "second-agent-dev.yaml" in content

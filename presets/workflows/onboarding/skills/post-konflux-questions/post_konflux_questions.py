@@ -25,17 +25,22 @@ Phase 1 is complete! Now let's set up Konflux CI/CD for your instance.
 
 I need a few details:
 
-1. **Quay org** — your Konflux tenant name, used for Quay image paths (e.g., `hcc-platex-services-tenant`)
-2. **Existing Konflux tenant?** Do you already have a tenant namespace, or should I create a new one?
-   - If existing, what's the tenant name?
-3. **Admin usernames** — Kerberos IDs for Konflux admin access (e.g., `jdoe`)
-4. **Maintainer usernames** — Kerberos IDs for maintainer access
-5. **Cost center** — e.g., `735`
+1. **Existing Konflux tenant?** Do you already have a tenant namespace, or should I create a new one?
+   - If existing: what's the **tenant name** and **which cluster** is it on?
+   - If new: I'll derive a tenant name from your team name (you can override)
+2. **Quay org** — the Quay organization for your container images. \
+This is often the same as the tenant name, but doesn't have to be. \
+(e.g., `my-team-tenant` or `rh-platform-experien-tenant`)
+3. **Admin usernames** — SSO/Kerberos usernames for Konflux admin access (e.g., `jdoe`)
+4. **Maintainer usernames** — SSO/Kerberos usernames for maintainer access
+5. **Cost center** — your team's cost center (required for new tenants)
 6. **Quota tier** — default: `1.small` (options: `0.base` through `6.xxxlarge`)
 
 Defaults I'll use unless you say otherwise:
 - **Cluster**: `kflux-prd-rh02`
 - **Tenant name**: `<derived from {team_name}>`
+- **Quay org**: same as tenant name
+- **Dockerfile**: `dev-bot/Dockerfile.runner`
 """
 
 

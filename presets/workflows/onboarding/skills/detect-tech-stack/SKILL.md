@@ -22,9 +22,9 @@ Scans the repo directory for language/framework markers and outputs JSON:
 ```json
 {
   "stack": ["react", "patternfly", "typescript"],
-  "suggested_envs": ["node", "browser"],
-  "suggested_personas": ["frontend"],
-  "default_branch": "master",
+  "envs": ["node", "browser"],
+  "personas": ["frontend"],
+  "target_branch": "master",
   "has_dockerfile": true,
   "visibility": "public",
   "note": "Suggestions based on file markers. Review and adjust before use."

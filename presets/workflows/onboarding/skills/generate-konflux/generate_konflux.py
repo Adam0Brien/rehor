@@ -15,11 +15,43 @@ from pathlib import Path
 
 _SAFE_NAME = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")
 
-CLUSTER_SUFFIXES = {
-    "kflux-prd-rh02": "kflux-prd-rh02.0fk9.p1",
-    "kflux-prd-rh03": "kflux-prd-rh03.nnv1.p1",
-    "kflux-ocp-p01": "kflux-ocp-p01.7ayg.p1",
-}
+def _discover_cluster_suffix(cluster, repo_path):
+    config_dir = Path(repo_path) / "config"
+    if not config_dir.is_dir():
+        raise ValueError(f"config/ directory not found in {repo_path}")
+    matches = [d.name for d in config_dir.iterdir() if d.is_dir() and d.name.startswith(f"{cluster}.")]
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        return sorted(matches)[0]
+    raise ValueError(
+        f"No cluster suffix found for '{cluster}' in {config_dir}. "
+        f"Available: {sorted(d.name for d in config_dir.iterdir() if d.is_dir() and '.' in d.name)}"
+    )
+
+
+def _discover_service_account(repo_path, cluster_suffix):
+    """Discover the release SA name from existing RPA files in the repo."""
+    config_dir = Path(repo_path) / "config"
+    search_dirs = [config_dir / cluster_suffix / "service" / "ReleasePlanAdmission"]
+    if not search_dirs[0].is_dir():
+        search_dirs = sorted(
+            d / "service" / "ReleasePlanAdmission"
+            for d in config_dir.iterdir()
+            if d.is_dir() and (d / "service" / "ReleasePlanAdmission").is_dir()
+        )
+    for rpa_base in search_dirs:
+        for rpa_file in sorted(rpa_base.rglob("*.yaml")):
+            try:
+                content = rpa_file.read_text()
+            except OSError:
+                continue
+            match = re.search(r"serviceAccountName:\s*(\S+)", content)
+            if match:
+                return match.group(1)
+    raise ValueError(
+        f"No existing ReleasePlanAdmission files found in {config_dir} to discover service account name"
+    )
 
 
 def _ns_yaml(tenant, cost_center):
@@ -82,42 +114,46 @@ def _tenant_kustomization(tenant, rbac_files, app_dirs):
     )
 
 
-def _application_yaml(app_name):
+def _application_yaml(instance_name, tenant=None):
+    ns = f"  namespace: {tenant}\n" if tenant else ""
     return (
         "---\n"
         "apiVersion: appstudio.redhat.com/v1alpha1\n"
         "kind: Application\n"
         "metadata:\n"
-        f"  name: {app_name}\n"
+        f"  name: {instance_name}\n"
+        f"{ns}"
         "spec:\n"
-        f"  description: {app_name}\n"
-        f"  displayName: {app_name}\n"
+        f"  displayName: {instance_name}\n"
     )
 
 
-def _component_yaml(component_name, app_name, source_url, dockerfile, default_branch):
+def _component_yaml(instance_name, repo_url, dockerfile, target_branch, tenant=None):
+    ns = f"  namespace: {tenant}\n" if tenant else ""
     return (
         "---\n"
         "apiVersion: appstudio.redhat.com/v1alpha1\n"
         "kind: Component\n"
         "metadata:\n"
+        f"  name: {instance_name}\n"
+        f"{ns}"
         "  annotations:\n"
-        '    build.appstudio.openshift.io/pipeline: \'{"name":"docker-build","bundle":"latest"}\'\n'
         "    build.appstudio.openshift.io/request: configure-pac\n"
-        f"  name: {component_name}\n"
+        '    build.appstudio.openshift.io/pipeline: \'{"name":"docker-build","bundle":"latest"}\'\n'
         "spec:\n"
-        f"  application: {app_name}\n"
-        f"  componentName: {component_name}\n"
+        f"  application: {instance_name}\n"
+        f"  componentName: {instance_name}\n"
         "  source:\n"
         "    git:\n"
-        "      context: ./\n"
+        f"      revision: {target_branch}\n"
+        f"      url: {repo_url}\n"
         f"      dockerfileUrl: {dockerfile}\n"
-        f"      revision: {default_branch}\n"
-        f"      url: {source_url}\n"
+        "      context: ./\n"
     )
 
 
-def _image_repository_yaml(component_name, app_name, tenant):
+def _image_repository_yaml(instance_name, quay_org, tenant=None):
+    ns = f"  namespace: {tenant}\n" if tenant else ""
     return (
         "---\n"
         "apiVersion: appstudio.redhat.com/v1alpha1\n"
@@ -125,13 +161,14 @@ def _image_repository_yaml(component_name, app_name, tenant):
         "metadata:\n"
         "  annotations:\n"
         '    image-controller.appstudio.redhat.com/update-component-image: "true"\n'
+        f"  name: {instance_name}-image-repository\n"
+        f"{ns}"
         "  labels:\n"
-        f"    appstudio.redhat.com/application: {app_name}\n"
-        f"    appstudio.redhat.com/component: {component_name}\n"
-        f"  name: {component_name}-image-repository\n"
+        f"    appstudio.redhat.com/application: {instance_name}\n"
+        f"    appstudio.redhat.com/component: {instance_name}\n"
         "spec:\n"
         "  image:\n"
-        f"    name: {tenant}/{app_name}/{component_name}\n"
+        f"    name: {quay_org}/{instance_name}\n"
         "    visibility: public\n"
         "  notifications:\n"
         "    - config:\n"
@@ -142,7 +179,8 @@ def _image_repository_yaml(component_name, app_name, tenant):
     )
 
 
-def _release_plan_yaml(app_name):
+def _release_plan_yaml(instance_name, tenant=None):
+    ns = f"  namespace: {tenant}\n" if tenant else ""
     return (
         "---\n"
         "apiVersion: appstudio.redhat.com/v1alpha1\n"
@@ -150,16 +188,46 @@ def _release_plan_yaml(app_name):
         "metadata:\n"
         "  labels:\n"
         '    release.appstudio.openshift.io/auto-release: "true"\n'
-        f"    release.appstudio.openshift.io/releasePlanAdmission: {app_name}\n"
         '    release.appstudio.openshift.io/standing-attribution: "true"\n'
-        f"  name: {app_name}-releaseplan\n"
+        f'    release.appstudio.openshift.io/releasePlanAdmission: "{instance_name}"\n'
+        f"  name: {instance_name}-releaseplan\n"
+        f"{ns}"
         "spec:\n"
-        f"  application: {app_name}\n"
+        f"  application: {instance_name}\n"
         "  target: rhtap-releng-tenant\n"
     )
 
 
-def _app_kustomization(tenant, app_name, component_name):
+def _integration_test_yaml(instance_name, tenant=None):
+    ns = f"  namespace: {tenant}\n" if tenant else ""
+    return (
+        "---\n"
+        "apiVersion: appstudio.redhat.com/v1beta2\n"
+        "kind: IntegrationTestScenario\n"
+        "metadata:\n"
+        f"  name: {instance_name}-enterprise-contract\n"
+        f"{ns}"
+        "spec:\n"
+        f"  application: {instance_name}\n"
+        "  contexts:\n"
+        "    - description: Application testing\n"
+        "      name: application\n"
+        "  params:\n"
+        "    - name: POLICY_CONFIGURATION\n"
+        "      value: rhtap-releng-tenant/app-interface-standard\n"
+        "  resolverRef:\n"
+        "    params:\n"
+        "      - name: url\n"
+        "        value: https://github.com/konflux-ci/build-definitions\n"
+        "      - name: revision\n"
+        "        value: main\n"
+        "      - name: pathInRepo\n"
+        "        value: pipelines/enterprise-contract.yaml\n"
+        "    resolver: git\n"
+    )
+
+
+def _app_kustomization(tenant, instance_name):
     return (
         "---\n"
         "apiVersion: kustomize.config.k8s.io/v1beta1\n"
@@ -168,45 +236,44 @@ def _app_kustomization(tenant, app_name, component_name):
         "resources:\n"
         "  - application.yaml\n"
         "  - release-plan.yaml\n"
-        f"  - {component_name}/component.yaml\n"
-        f"  - {component_name}/image-repository.yaml\n"
+        f"  - {instance_name}/component.yaml\n"
+        f"  - {instance_name}/image-repository.yaml\n"
     )
 
 
-def _rpa_yaml(service_name, component_name, app_name, tenant, quay_org):
+def _rpa_yaml(service_name, instance_name, tenant, quay_org, service_account):
     return (
         "---\n"
         "apiVersion: appstudio.redhat.com/v1alpha1\n"
         "kind: ReleasePlanAdmission\n"
         "metadata:\n"
         "  labels:\n"
-        "    pp.engineering.redhat.com/business-unit: unknown\n"
         '    release.appstudio.openshift.io/block-releases: "false"\n'
-        f"  name: {service_name}\n"
+        "    pp.engineering.redhat.com/business-unit: other\n"
+        f"  name: {instance_name}\n"
         "  namespace: rhtap-releng-tenant\n"
         "spec:\n"
         "  applications:\n"
-        f"    - {app_name}\n"
+        f"    - {instance_name}\n"
         f"  origin: {tenant}\n"
         "  policy: app-interface-standard\n"
         "  data:\n"
         "    releaseNotes:\n"
-        f"      product_name: {service_name}\n"
-        '      product_version: "1.0.0"\n'
+        f"      product_name: {instance_name}\n"
+        "      product_version: 1.0.0\n"
         "    mapping:\n"
-        "      registrySecret: konflux-release-service-access-management-token\n"
-        "      defaults:\n"
-        "        public: True\n"
-        "        tags:\n"
-        "          - latest\n"
-        "        pushSourceContainer: false\n"
         "      components:\n"
-        f"        - name: {component_name}\n"
+        f"        - name: {instance_name}\n"
         "          repositories:\n"
-        f'            - url: "quay.io/redhat-services-prod/{quay_org}/"\n'
-        "    pyxis:\n"
-        "      secret: pyxis-prod-secret\n"
-        "      server: production\n"
+        f'            - url: "quay.io/redhat-services-prod/{quay_org}/{instance_name}"\n'
+        "              tags:\n"
+        "                - latest\n"
+        '                - "{{ git_sha }}"\n'
+        '                - "{{ git_short_sha }}"\n'
+        '                - "{{ digest_sha }}"\n'
+        "          public: true\n"
+        "          pushSourceContainer: false\n"
+        "      registrySecret: konflux-release-service-access-management-token\n"
         "    intention: production\n"
         "  pipeline:\n"
         "    pipelineRef:\n"
@@ -218,17 +285,19 @@ def _rpa_yaml(service_name, component_name, app_name, tenant, quay_org):
         "          value: production\n"
         "        - name: pathInRepo\n"
         '          value: "pipelines/managed/rh-push-to-external-registry/rh-push-to-external-registry.yaml"\n'
-        "    serviceAccountName: release-app-interface-prod\n"
+        f"    serviceAccountName: {service_account}\n"
         "    timeouts:\n"
-        '      pipeline: "4h0m0s"\n'
-        '      tasks: "1h0m0s"\n'
+        '      pipeline: "1h0m0s"\n'
+        "      tasks: 1h0m0s\n"
     )
 
 
-def _constraints_yaml(service_name, tenant, quay_org):
+def _constraints_yaml(service_name, tenant, quay_org, service_account):
     tenant_re = re.escape(tenant)
     quay_org_re = re.escape(quay_org)
     service_re = re.escape(service_name)
+    sa_base = re.sub(r"-(staging|prod)$", "", service_account)
+    sa_pattern = f"{re.escape(sa_base)}-((staging)|(prod))"
     return (
         "---\n"
         "properties:\n"
@@ -281,7 +350,7 @@ def _constraints_yaml(service_name, tenant, quay_org):
         "rh-push-to-external-registry/"
         "rh-push-to-external-registry.yaml\n"
         "          serviceAccountName:\n"
-        "            pattern: release-app-interface-((staging)|(prod))\n"
+        f"            pattern: {sa_pattern}\n"
     )
 
 
@@ -318,26 +387,25 @@ def generate(cfg, repo_path):
     root = Path(repo_path)
     tenant = cfg["tenant"]
     cluster = cfg.get("cluster", "kflux-prd-rh02")
-    cluster_suffix = CLUSTER_SUFFIXES.get(cluster, f"{cluster}.unknown")
-    app_name = cfg["app_name"]
-    component_name = cfg.get("component_name", app_name)
-    source_url = cfg["source_url"]
+    cluster_suffix = _discover_cluster_suffix(cluster, repo_path)
+    service_account = _discover_service_account(repo_path, cluster_suffix)
+    instance_name = cfg["instance_name"]
+    repo_url = cfg["repo_url"]
 
     for name, field in [
         (tenant, "tenant"),
         (cluster, "cluster"),
-        (app_name, "app_name"),
-        (component_name, "component_name"),
+        (instance_name, "instance_name"),
     ]:
         _validate_name(name, field)
     dockerfile = cfg.get("dockerfile", "dev-bot/Dockerfile.runner")
-    default_branch = cfg.get("default_branch", "master")
+    target_branch = cfg.get("target_branch", "main")
     admins = cfg.get("admins", [])
     maintainers = cfg.get("maintainers", [])
-    cost_center = cfg.get("cost_center", "735")
+    cost_center = cfg.get("cost_center", "")
     quota_tier = cfg.get("quota_tier", "1.small")
-    quay_org = cfg.get("quay_org", "rh-platform-experien-tenant")
-    service_name = cfg.get("service_name", app_name)
+    quay_org = cfg["quay_org"]
+    service_name = cfg.get("service_name", instance_name)
     new_tenant = cfg.get("new_tenant", True)
 
     for name, field in [(quay_org, "quay_org"), (service_name, "service_name")]:
@@ -346,6 +414,8 @@ def generate(cfg, repo_path):
     files_written = []
 
     if new_tenant:
+        if not cost_center:
+            raise ValueError("cost_center is required when creating a new tenant")
         admin_dir = root / "tenants-config" / "cluster" / cluster / "admin" / tenant
         admin_dir.mkdir(parents=True, exist_ok=True)
         (admin_dir / "ns.yaml").write_text(_ns_yaml(tenant, cost_center))
@@ -374,7 +444,7 @@ def generate(cfg, repo_path):
                     "rbac-contributors.yaml",
                     "rbac-maintainers.yaml",
                 ],
-                [app_name],
+                [instance_name],
             )
         )
         files_written.extend(
@@ -384,34 +454,84 @@ def generate(cfg, repo_path):
             ]
         )
 
-    app_dir = root / "tenants-config" / "cluster" / cluster / "tenants" / tenant / app_name
-    comp_dir = app_dir / component_name
-    comp_dir.mkdir(parents=True, exist_ok=True)
+    tenant_dir = root / "tenants-config" / "cluster" / cluster / "tenants" / tenant
+    tenant_dir.mkdir(parents=True, exist_ok=True)
 
-    (app_dir / "application.yaml").write_text(_application_yaml(app_name))
-    (app_dir / "release-plan.yaml").write_text(_release_plan_yaml(app_name))
-    (app_dir / "kustomization.yaml").write_text(_app_kustomization(tenant, app_name, component_name))
-    (comp_dir / "component.yaml").write_text(
-        _component_yaml(component_name, app_name, source_url, dockerfile, default_branch)
-    )
-    (comp_dir / "image-repository.yaml").write_text(_image_repository_yaml(component_name, app_name, tenant))
-    files_written.extend(
-        [str((app_dir / f).relative_to(root)) for f in ["application.yaml", "release-plan.yaml", "kustomization.yaml"]]
-    )
-    files_written.extend([str((comp_dir / f).relative_to(root)) for f in ["component.yaml", "image-repository.yaml"]])
+    if new_tenant:
+        app_dir = tenant_dir / instance_name
+        comp_dir = app_dir / instance_name
+        comp_dir.mkdir(parents=True, exist_ok=True)
+
+        (app_dir / "application.yaml").write_text(_application_yaml(instance_name))
+        (app_dir / "release-plan.yaml").write_text(_release_plan_yaml(instance_name))
+        (app_dir / "kustomization.yaml").write_text(_app_kustomization(tenant, instance_name))
+        (comp_dir / "component.yaml").write_text(
+            _component_yaml(instance_name, repo_url, dockerfile, target_branch)
+        )
+        (comp_dir / "image-repository.yaml").write_text(
+            _image_repository_yaml(instance_name, quay_org)
+        )
+        files_written.extend(
+            [str((app_dir / f).relative_to(root)) for f in [
+                "application.yaml", "release-plan.yaml", "kustomization.yaml",
+            ]]
+        )
+        files_written.extend(
+            [str((comp_dir / f).relative_to(root)) for f in [
+                "component.yaml", "image-repository.yaml",
+            ]]
+        )
+    else:
+        combined = _application_yaml(instance_name, tenant) + _component_yaml(
+            instance_name, repo_url, dockerfile, target_branch, tenant
+        )
+        new_files = [
+            f"{instance_name}.yaml",
+            f"{instance_name}.imagerepository.yaml",
+            f"{instance_name}.release-plan.yaml",
+            f"{instance_name}.enterprise-contract.integrationtestscenario.yaml",
+        ]
+        (tenant_dir / new_files[0]).write_text(combined)
+        (tenant_dir / new_files[1]).write_text(
+            _image_repository_yaml(instance_name, quay_org, tenant)
+        )
+        (tenant_dir / new_files[2]).write_text(
+            _release_plan_yaml(instance_name, tenant)
+        )
+        (tenant_dir / new_files[3]).write_text(
+            _integration_test_yaml(instance_name, tenant)
+        )
+        files_written.extend(
+            [str((tenant_dir / f).relative_to(root)) for f in new_files]
+        )
+
+        kustom_path = tenant_dir / "kustomization.yaml"
+        if kustom_path.exists():
+            kustom_content = kustom_path.read_text()
+            for f in new_files:
+                if f not in kustom_content:
+                    kustom_content = kustom_content.rstrip("\n") + f"\n  - {f}\n"
+            kustom_path.write_text(kustom_content)
+            files_written.append(str(kustom_path.relative_to(root)))
 
     rpa_dir = root / "config" / cluster_suffix / "service" / "ReleasePlanAdmission" / service_name
     rpa_dir.mkdir(parents=True, exist_ok=True)
-    (rpa_dir / f"{component_name}.yaml").write_text(_rpa_yaml(service_name, component_name, app_name, tenant, quay_org))
-    files_written.append(str((rpa_dir / f"{component_name}.yaml").relative_to(root)))
+    (rpa_dir / f"{instance_name}.yaml").write_text(
+        _rpa_yaml(service_name, instance_name, tenant, quay_org, service_account)
+    )
+    files_written.append(str((rpa_dir / f"{instance_name}.yaml").relative_to(root)))
 
-    constraints_dir = root / "constraints" / "service"
-    constraints_dir.mkdir(parents=True, exist_ok=True)
-    (constraints_dir / f"{service_name}.yaml").write_text(_constraints_yaml(service_name, tenant, quay_org))
-    files_written.append(str((constraints_dir / f"{service_name}.yaml").relative_to(root)))
+    if new_tenant:
+        constraints_dir = root / "constraints" / "service"
+        constraints_dir.mkdir(parents=True, exist_ok=True)
+        (constraints_dir / f"{service_name}.yaml").write_text(
+            _constraints_yaml(service_name, tenant, quay_org, service_account)
+        )
+        files_written.append(str((constraints_dir / f"{service_name}.yaml").relative_to(root)))
 
-    _update_codeowners(repo_path, tenant, cluster, cluster_suffix, service_name)
-    files_written.append("CODEOWNERS")
+    if new_tenant:
+        _update_codeowners(repo_path, tenant, cluster, cluster_suffix, service_name)
+        files_written.append("CODEOWNERS")
 
     return {"files_written": sorted(files_written), "new_tenant": new_tenant}
 
@@ -431,11 +551,14 @@ def main():
     if not cfg.get("tenant"):
         print(json.dumps({"error": "tenant is required"}))
         sys.exit(1)
-    if not cfg.get("app_name"):
-        print(json.dumps({"error": "app_name is required"}))
+    if not cfg.get("instance_name"):
+        print(json.dumps({"error": "instance_name is required"}))
         sys.exit(1)
-    if not cfg.get("source_url"):
-        print(json.dumps({"error": "source_url is required"}))
+    if not cfg.get("repo_url"):
+        print(json.dumps({"error": "repo_url is required"}))
+        sys.exit(1)
+    if not cfg.get("quay_org"):
+        print(json.dumps({"error": "quay_org is required"}))
         sys.exit(1)
 
     result = generate(cfg, repo_path)

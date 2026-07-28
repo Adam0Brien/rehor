@@ -11,15 +11,38 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from jira_mcp import jira_cleanup
-from onboarding_helpers import post_comment
+from onboarding_helpers import apply_label, post_comment
+
+LABEL = "onboarding:deployment-confirmation"
 
 
 def _build_comment(config):
     quay_org = config.get("quay_org", "<quay_org>")
     instance_name = config.get("instance_name", "<instance_name>")
-    repo_url = config.get("instance_repo_url", "<instance_repo_url>")
+    repo_url = config.get("repo_url", "<repo_url>")
     config_name = config.get("config_name", "<config_name>")
+    bot_name = config.get("bot_name", "<bot_name>")
+    bot_label = config.get("bot_label", "<bot_label>")
     pattern = config.get("pattern", "shared")
+    gcp_project_id = config.get("gcp_project_id", "<gcp_project_id>")
+    gcp_region = config.get("gcp_region", "global")
+    target_branch = config.get("target_branch", "main")
+    workflow = config.get("workflow", "jira-sprint")
+
+    workflow_lines = ""
+    if workflow == "jira-sprint":
+        board_name = config.get("board_name", "")
+        sprint_prefix = config.get("sprint_prefix", "")
+        workflow_lines = (
+            f"\n- **Board name**: `{board_name}`"
+            f"\n- **Sprint prefix**: `{sprint_prefix}`"
+        )
+    elif workflow == "jira-kanban":
+        board_id = config.get("board_id", "")
+        jira_project = config.get("jira_project", "")
+        workflow_lines = f"\n- **Board ID**: `{board_id}`"
+        if jira_project:
+            workflow_lines += f"\n- **Jira project**: `{jira_project}`"
 
     return f"""\
 ## [Phase 3/3] Deployment — Confirming Details
@@ -27,10 +50,17 @@ def _build_comment(config):
 Phase 2 is complete! Final phase — deploying your bot.
 
 Confirming these values for the app-interface MR:
-- **Quay image**: `quay.io/redhat-services-prod/{quay_org}/{instance_name}`
+- **Instance name**: `{instance_name}`
+- **Bot name**: `{bot_name}`
+- **Bot label**: `{bot_label}`
 - **Config repo**: `{repo_url}`
 - **Config path**: `instance/{config_name}`
+- **Target branch**: `{target_branch}`
+- **Workflow**: `{workflow}`{workflow_lines}
+- **Quay image**: `quay.io/redhat-services-prod/{quay_org}/{instance_name}`
 - **SaaS pattern**: {pattern}
+- **GCP project**: `{gcp_project_id}`
+- **GCP region**: `{gcp_region}`
 
 Any corrections? If not, reply "looks good" and I'll open the deployment MR.
 """
@@ -58,7 +88,9 @@ def main():
         if not ok:
             sys.exit(1)
 
-        print(json.dumps({"epic_key": epic_key, "posted": True}))
+        apply_label(epic_key, LABEL)
+
+        print(json.dumps({"epic_key": epic_key, "label": LABEL, "posted": True}))
     finally:
         jira_cleanup()
 

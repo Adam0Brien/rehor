@@ -19,7 +19,7 @@
     },
     "workflow": {
       "type": "string",
-      "enum": ["jira-sprint", "jira-kanban"],
+      "enum": ["jira-sprint", "jira-kanban", "onboarding"],
       "default": "jira-sprint"
     },
     "source": {
@@ -96,9 +96,13 @@
       },
       "additionalProperties": false
     },
+    "repo_url": {
+      "type": "string",
+      "description": "Instance repo URL (e.g. https://github.com/MyOrg/my-agent-dev)"
+    },
     "github_org": {
       "type": "string",
-      "default": "RedHatInsights"
+      "description": "GitHub org (used to construct repo_url if repo_url not provided)"
     },
     "claude_md_strategy": {
       "type": "string",
@@ -118,7 +122,7 @@
     },
     "target_branch": {
       "type": "string",
-      "default": "master"
+      "default": "main"
     }
   },
   "additionalProperties": false

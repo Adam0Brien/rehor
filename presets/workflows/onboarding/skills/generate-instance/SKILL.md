@@ -58,10 +58,8 @@ Templates live in `templates/` and use Jinja2 with custom delimiters (`<< >>` fo
   "repos": [
     {
       "name": "my-frontend",
-      "url": "https://github.com/RedHatInsights/my-frontend.git",
-      "host": "github",
-      "fork_account": "platex-rehor-bot",
-      "fork_name": "my-frontend"
+      "url": "https://github.com/MyOrg/my-frontend.git",
+      "host": "github"
     }
   ],
   "resources": {
@@ -75,9 +73,9 @@ Templates live in `templates/` and use Jinja2 with custom delimiters (`<< >>` fo
     "start": "0 9 * * 1-5",
     "end": "0 18 * * 1-5"
   },
-  "github_org": "RedHatInsights",
-  "konflux_namespace": "my-team-tenant",
-  "target_branch": "master",
+  "github_org": "MyOrg",
+  "repo_url": "https://github.com/MyOrg/my-team-agent-dev",
+  "target_branch": "main",
   "claude_md_strategy": "append",
   "tech_stacks": [{"repo": "my-frontend", "personas": ["frontend"], "envs": ["node"]}]
 }
@@ -127,7 +125,7 @@ Override any value via the `resources` object in the requirements JSON.
 
 ## Prerequisites
 
-- Bot account (`platex-rehor-bot` for GitHub, `platform-experience-services-bot` for GitLab) must have write access to the runner repo before the scaffolding PR can be opened. The workflow posts instructions asking the team to add the bot as a collaborator.
+- A bot account must have write access to the runner repo before the scaffolding PR can be opened. Defaults: `platex-rehor-bot` (GitHub), `platform-experience-services-bot` (GitLab). Teams using custom fork accounts should specify them in the config. The workflow posts instructions asking the team to add the bot as a collaborator.
 - The scaffolding PR is opened from a fork of the runner repo (via `/auto-fork`), not pushed directly.
 
 ## Critical Gotchas

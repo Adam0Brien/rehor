@@ -7,19 +7,26 @@
 set -e
 
 ENVS=""
+FOUND_CONFIG=false
 for cfg in instance/*/agent/instance.yaml; do
     [ -f "$cfg" ] || continue
+    FOUND_CONFIG=true
     ENVS="$ENVS $(sed -n '/^envs:/,/^[^ ]/{ s/^  - //p }' "$cfg")"
 done
 ENVS=$(echo "$ENVS" | tr ' ' '\n' | sort -u | xargs)
 
-if [ -z "$ENVS" ]; then
-    echo "[install-envs] No instance.yaml envs found — installing all presets"
+if [ "$FOUND_CONFIG" = false ]; then
+    echo "[install-envs] No instance.yaml found — installing all presets (local dev)"
     shopt -s nullglob
     for script in presets/envs/*/install.sh; do
         echo "[install-envs] Running $(basename "$(dirname "$script")")"
         bash "$script"
     done
+    exit 0
+fi
+
+if [ -z "$ENVS" ]; then
+    echo "[install-envs] instance.yaml found but no envs specified — skipping preset install"
     exit 0
 fi
 

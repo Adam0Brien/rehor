@@ -22,6 +22,8 @@ skill_dirs = [
     repo_root / "presets" / "workflows" / "jira-sprint" / "skills" / "claim-ticket",
     repo_root / "presets" / "workflows" / "jira-kanban" / "skills" / "claim-ticket",
     repo_root / "presets" / "workflows" / "onboarding" / "skills" / "generate-instance",
+    repo_root / "presets" / "workflows" / "onboarding" / "skills" / "generate-konflux",
+    repo_root / "presets" / "workflows" / "onboarding" / "skills" / "generate-app-interface",
 ]
 
 for skill_path in skill_dirs:

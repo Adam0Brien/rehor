@@ -28,19 +28,39 @@ Modifies or creates the SaaS file in the `<app_interface_repo_path>` (a clone of
   "bot_name": "devbot-myteam",
   "bot_label": "rehor-ai-myteam",
   "instance_id": "my-team-agent-dev",
-  "github_org": "RedHatInsights",
-  "repo_url": "https://github.com/RedHatInsights/my-team-agent-dev",
+  "repo_url": "https://github.com/MyOrg/my-team-agent-dev",
   "quay_org": "my-team-tenant",
   "config_name": "my-config",
-  "config_repo": "https://github.com/RedHatInsights/my-team-agent-dev.git",
+  "config_repo": "https://github.com/MyOrg/my-team-agent-dev",
   "config_path": "instance/my-config",
   "workflow": "jira-sprint",
   "board_name": "My Board",
   "sprint_prefix": "MyTeam Sprint",
   "slack_webhook_url": "",
+  "slack_notify_mode": "",
+  "gcp_project_id": "my-gcp-project",
+  "gcp_region": "global",
+  "vertex_allowed_models": "claude-sonnet-4-6,claude-opus-4-6,claude-haiku-4-5",
+  "target_branch": "main",
   "pattern": "shared"
 }
 ```
+
+### Required Fields
+
+- `instance_name`, `repo_url`, `quay_org`, `gcp_project_id`
+
+### Defaults and Behavior
+
+| Field | Required | Default | Notes |
+|-------|----------|---------|-------|
+| `gcp_project_id` | **yes** | — | |
+| `gcp_region` | no | `global` | |
+| `vertex_allowed_models` | no | `claude-sonnet-4-6,claude-opus-4-6,claude-haiku-4-5` | |
+| `pattern` | no | `shared` | `shared` modifies existing SaaS; `separate` creates new file |
+| `config_repo` | no | `repo_url` | Used as-is — no `.git` suffix auto-added |
+| `target_branch` | no | `main` | Branch ref for the deployment target |
+| `slack_notify_mode` | no | — | Only included if set (e.g. `daily_digest`) |
 
 ## Prerequisites
 
@@ -52,7 +72,7 @@ Clone and checkout before running this skill.
 
 ## Two SaaS File Patterns
 
-Each team should have their own SaaS file — prefer `pattern: "separate"` for new onboardings so each team's deployment is independently manageable.
+Defaults to `"shared"`. Set `pattern: "separate"` when the team needs their own independently manageable SaaS file.
 
 ### Pattern A: Shared (`pattern: "shared"`)
 
@@ -75,7 +95,7 @@ managedResourceTypes, imagePatterns, and resourceTemplates.
 
 - `managedResourceTypes` MUST include `ScaledObject.keda.sh`
 - `BOT_REPLICAS` value must be string `'0'` (KEDA manages scaling)
-- All instances target the same namespace: `$ref: /services/insights/platform-frontend-ai-dev/namespaces/stage.hcmais01ue1.yml`
+- All shared-pattern instances target the same namespace — the `$ref` is discovered from existing entries in the shared `deploy.yml`
 - The `images` block requires org ref: `$ref: /dependencies/quay/redhat-services-prod.yml`
 - `authentication` ref: `$ref: /services/app-sre/saas-file-auth/global.yml`
 - Separate SaaS files need `takeover: true`

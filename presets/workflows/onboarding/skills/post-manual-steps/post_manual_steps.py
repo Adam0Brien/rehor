@@ -18,17 +18,27 @@ LABEL = "onboarding:manual-steps"
 
 def _build_comment(config):
     bot_label = config.get("bot_label", "<bot_label>")
+    instance_name = config.get("instance_name", "<instance_name>")
+    dedicated_proxy = config.get("dedicated_proxy", False)
+
+    credentials_step = (
+        "- [ ] **Credentials** — your team is using a dedicated proxy. "
+        "Coordinate with the Rehor team to configure your proxy deployment "
+        "with the correct Jira/GitHub/GitLab credentials."
+        if dedicated_proxy
+        else "- [ ] **Credentials** — using shared bot accounts (default). "
+        "If you need separate Jira/GitHub/GitLab credentials, let the Rehor team know — "
+        "this requires a dedicated proxy deployment."
+    )
 
     return f"""\
 ## [Phase 3/3] Deployment — Final Steps
 
 The deployment MR is merged. Almost there! A few manual steps remain:
 
-- [ ] **Verify deployment** — confirm the pod is running in the `hcmais` cluster
+- [ ] **Verify deployment** — confirm the `{instance_name}` pod is running in the target cluster
 - [ ] **Create Jira label** — first ticket with label `{bot_label}` creates it implicitly, or create manually
-- [ ] **Credentials** — if your team needs different Jira/GitHub/GitLab credentials \
-than the shared bot accounts, coordinate with the Rehor team. \
-This requires a dedicated proxy deployment.
+{credentials_step}
 
 Please reply "done" for each step as you complete it, or ask questions if stuck.
 """

@@ -43,6 +43,8 @@ testpaths = [
     "presets/workflows/jira-sprint/skills/claim-ticket/tests",
     "presets/workflows/jira-kanban/skills/claim-ticket/tests",
     "presets/workflows/onboarding/skills/generate-instance/tests",
+    "presets/workflows/onboarding/skills/generate-konflux/tests",
+    "presets/workflows/onboarding/skills/generate-app-interface/tests",
 ]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]

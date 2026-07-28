@@ -288,6 +288,10 @@ def generate(req, output_dir):
     (agent_dir / "instance.yaml").write_text(_gen_instance_yaml(req))
     (agent_dir / "mcp.json").write_text(_gen_mcp_json())
 
+    skills_dir = agent_dir / "skills"
+    skills_dir.mkdir(parents=True, exist_ok=True)
+    (skills_dir / ".gitkeep").touch()
+
     strategy = req.get("claude_md_strategy", "append")
     if strategy != "ignore":
         claude_tpl = env.get_template("claude.md.j2")
@@ -327,12 +331,15 @@ def generate(req, output_dir):
     deploy_ctx = _build_deploy_context(req)
     (deploy_dir / "template.yaml").write_text(deploy_tpl.render(**deploy_ctx))
 
-    github_org = req.get("github_org", "RedHatInsights")
+    repo_url = req.get("repo_url", "")
+    if not repo_url:
+        github_org = req.get("github_org", "")
+        repo_url = f"https://github.com/{github_org}/{instance_name}" if github_org else ""
     manifest = {
         "repos": [
             {
                 "name": instance_name,
-                "upstream": (f"https://github.com/{github_org}/{instance_name}"),
+                "upstream": repo_url,
                 "host": "github",
             }
         ]

@@ -31,19 +31,34 @@ To get started, I need some details about your instance:
 (`<name>-agent-dev`), bot label, and identity. Examples: *phoenix*, *herald*, \
 *ziggy*, *arclight*. Doesn't have to be your team name.
 - [ ] **Team name** — your team's display name (for docs and Jira comments)
+- [ ] **GitHub org** — the org that will own your instance repo (e.g., `RedHatInsights`, `project-kessel`)
 - [ ] **Target repo URL(s)** — the repo(s) your bot will work on (GitHub and/or GitLab)
 - [ ] **Jira project key** — the project your bot will pick up tickets from
 
 ### Optional (defaults applied if not specified)
 - [ ] Workflow type — default: `jira-sprint` (also available: `jira-kanban`)
+- [ ] Default branch — default: `main` (let us know if your org uses `master` or another branch)
 - [ ] KEDA schedule — default: weekdays 9am–6pm ET
 - [ ] Board name / sprint prefix — only if using sprint workflow
 - [ ] Board ID / Jira project key — only if using kanban workflow
-- [ ] Custom fork accounts — if your team uses different fork accounts than \
-the defaults (`platex-rehor-bot` for GitHub, `platform-experience-services-bot` for GitLab)
-- [ ] Dedicated proxy — if your team can't use the shared bot accounts and needs \
-separate Jira/GitHub/GitLab credentials (triggers extra setup: dedicated proxy \
-deployment + GCP Vertex project request)
+- [ ] Custom fork accounts — default: `platex-rehor-bot` (GitHub), \
+`platform-experience-services-bot` (GitLab). Let us know if your team uses different accounts.
+- [ ] Slack notifications — provide a Slack webhook URL if you want the bot to post status updates to a channel
+
+### Infrastructure
+- [ ] **Shared or fresh?** — most teams use shared Rehor infrastructure (shared proxy, \
+shared namespace, shared GCP project). If your team is outside `RedHatInsights` or needs \
+separate Jira/GitHub/GitLab credentials, you'll need **fresh infrastructure** — let us know \
+so we can plan accordingly. (Default: shared)
+
+### Heads up for Phase 2 & 3
+These aren't needed yet, but good to start thinking about:
+- **Konflux tenant** — do you have an existing Konflux tenant namespace, or will we create one?
+- **GCP project** — a GCP project with Vertex AI API enabled is required for deployment. \
+If you're using shared infrastructure, the existing project covers you. \
+If fresh, you'll need your own — start the request early if needed.
+- **Dedicated proxy** — fresh infrastructure requires a dedicated proxy deployment for your \
+credentials. This is set up by the Rehor team but adds lead time.
 
 Please provide these details and I'll put together an onboarding plan for your approval.
 """

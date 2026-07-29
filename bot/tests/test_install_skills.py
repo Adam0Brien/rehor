@@ -1,6 +1,5 @@
 """Tests for install_skills() — shared/workflow/env skill installation."""
 
-import shutil
 from pathlib import Path
 
 import pytest

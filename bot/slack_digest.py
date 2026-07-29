@@ -42,7 +42,11 @@ def cmd_digest():
         print(json.dumps({"sent": False, "reason": "Weekend — digest skipped"}))
         return
 
-    digest_hour = int(os.environ.get("SLACK_DIGEST_HOUR", "9"))
+    digest_hour_raw = os.environ.get("SLACK_DIGEST_HOUR")
+    if not digest_hour_raw:
+        return
+
+    digest_hour = int(digest_hour_raw)
     if now.hour < digest_hour:
         print(json.dumps({"sent": False, "reason": f"Before digest hour (current: {now.hour}, target: {digest_hour})"}))
         return

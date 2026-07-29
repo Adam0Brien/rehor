@@ -80,21 +80,18 @@ class TestDigestHourCheck:
         output = json.loads(capsys.readouterr().out.strip())
         assert output["sent"] is True
 
-    def test_default_hour_is_9(self, monkeypatch, capsys):
+    def test_skips_when_digest_hour_not_set(self, monkeypatch, capsys):
+        """Opt-in: no SLACK_DIGEST_HOUR means digest is disabled."""
         monkeypatch.setenv("SLACK_WEBHOOK_URL", "https://hooks.slack.com/test")
         monkeypatch.delenv("SLACK_DIGEST_HOUR", raising=False)
         wednesday_9 = datetime(2026, 7, 15, 9, 0, tzinfo=timezone.utc)
 
-        with (
-            patch.object(slack_digest, "datetime") as mock_dt,
-            patch.object(slack_digest, "memory_call", return_value={"sent": False, "count": 0}),
-            patch.object(slack_digest, "memory_cleanup"),
-        ):
+        with patch.object(slack_digest, "datetime") as mock_dt:
             mock_dt.now.return_value = wednesday_9
             slack_digest.cmd_digest()
 
-        output = json.loads(capsys.readouterr().out.strip())
-        assert "Before digest hour" not in output.get("reason", "")
+        output = capsys.readouterr().out.strip()
+        assert output == ""
 
 
 class TestDigestNoWebhook:

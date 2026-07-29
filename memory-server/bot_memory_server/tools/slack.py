@@ -53,7 +53,7 @@ def register_slack_tools(mcp: FastMCP):
 
         notify_mode = os.environ.get("SLACK_NOTIFY_MODE", "immediate")
 
-        if notify_mode == "daily_digest":
+        if notify_mode == "daily_digest" and os.environ.get("SLACK_DIGEST_HOUR"):
             existing = await pool.fetchrow(
                 """
                 SELECT id FROM slack_digest_queue

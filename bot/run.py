@@ -18,6 +18,7 @@ from urllib.request import urlopen
 from dotenv import load_dotenv
 from filelock import FileLock, Timeout
 
+from . import idle_reminder
 from .agent import run_cycle
 from .config import (
     ALLOWED_TOOLS,
@@ -32,6 +33,7 @@ from .config import (
     validate_instance_config,
     validate_manifest,
 )
+from .constants import MEMORY_API_BASE
 from .costs import record_cost
 from .merge import apply_merged_config, install_skills
 from .preflight import run_preflight
@@ -196,9 +198,7 @@ SLEEP_SIGNAL_FILE = DATA_DIR / "cycle-sleep.json"
 LOW_DISK_THRESHOLD_MB = 512
 WAKE_POLL_INTERVAL = 5
 
-DASHBOARD_BASE_URL = os.environ.get("BOT_DASHBOARD_URL", "http://localhost:8080/api/bot-status").rsplit(
-    "/bot-status", 1
-)[0]
+DASHBOARD_BASE_URL = os.environ.get("MEMORY_API_URL", MEMORY_API_BASE)
 
 
 def _check_wake_signal(instance_id: str) -> bool:
@@ -512,13 +512,19 @@ def main() -> None:
                         preflight_result.transcript,
                         input_prompt=preflight_result.transcript,
                     )
-                    _write_sleep_signal(300, "preflight_skip")
+                    idle_reminder.on_preflight_skip(
+                        instance_id or args.label,
+                        idle_cycle_limit=instance_config.idle_cycle_limit,
+                        cooldown_seconds=config.idle_reminder_cooldown_seconds,
+                    )
+                    _write_sleep_signal(config.idle_interval, "preflight_skip")
                     _read_sleep_signal(config, instance_id)
                     cleanup_between_cycles(SCRIPT_DIR)
                     continue
 
                 # action == "start"
                 consecutive_preflight_errors = 0
+                idle_reminder.on_preflight_start(instance_id or args.label)
                 preflight_prompt = preflight_result.prompt
                 logger.info("Preflight start — launching session with pre-fetched data")
 

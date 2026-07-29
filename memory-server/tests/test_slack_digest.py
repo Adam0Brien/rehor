@@ -179,7 +179,7 @@ class TestSlackNotifyDigest:
 
         with (
             patch("bot_memory_server.tools.slack.get_pool", return_value=pool),
-            patch.dict(os.environ, {"SLACK_NOTIFY_MODE": "daily_digest"}),
+            patch.dict(os.environ, {"SLACK_NOTIFY_MODE": "daily_digest", "SLACK_DIGEST_HOUR": "9"}),
         ):
             result = await slack_notify(
                 external_key="RHCLOUD-200",
@@ -212,7 +212,7 @@ class TestSlackNotifyDigest:
 
         with (
             patch("bot_memory_server.tools.slack.get_pool", return_value=pool),
-            patch.dict(os.environ, {"SLACK_NOTIFY_MODE": "daily_digest"}),
+            patch.dict(os.environ, {"SLACK_NOTIFY_MODE": "daily_digest", "SLACK_DIGEST_HOUR": "9"}),
         ):
             r1 = await slack_notify(
                 external_key="RHCLOUD-300",
@@ -239,7 +239,7 @@ class TestSlackNotifyDigest:
 
         with (
             patch("bot_memory_server.tools.slack.get_pool", return_value=pool),
-            patch.dict(os.environ, {"SLACK_NOTIFY_MODE": "daily_digest"}),
+            patch.dict(os.environ, {"SLACK_NOTIFY_MODE": "daily_digest", "SLACK_DIGEST_HOUR": "9"}),
         ):
             result = await slack_notify(
                 external_key="RHCLOUD-300",

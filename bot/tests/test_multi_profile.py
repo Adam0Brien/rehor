@@ -8,12 +8,9 @@ import sync_config_repo and assemble_claude_md via importlib with the
 heavy dependency mocked out.
 """
 
-import importlib
 import json
 import os
 import sys
-from pathlib import Path
-from types import ModuleType
 from unittest.mock import MagicMock, patch
 
 import pytest

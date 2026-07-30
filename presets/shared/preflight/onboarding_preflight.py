@@ -34,7 +34,7 @@ def _jira_issue(key):
         "jira_get_issue",
         {
             "issue_key": key,
-            "fields": "summary,status,assignee,labels,issuelinks",
+            "fields": "summary,status,assignee,labels,issuelinks,comment",
             "comment_limit": 10,
         },
     )

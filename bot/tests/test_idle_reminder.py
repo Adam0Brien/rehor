@@ -187,12 +187,39 @@ def test_memory_api_base_from_env(monkeypatch):
     importlib.reload(constants_mod)
 
 
+def test_memory_api_base_derived_from_bot_memory_url(monkeypatch):
+    import importlib
+
+    import bot.constants as constants_mod
+
+    monkeypatch.delenv("MEMORY_API_URL", raising=False)
+    monkeypatch.setenv("BOT_MEMORY_URL", "http://memory-server:8080/mcp")
+    importlib.reload(constants_mod)
+    assert constants_mod.MEMORY_API_BASE == "http://memory-server:8080/api"
+    monkeypatch.delenv("BOT_MEMORY_URL")
+    importlib.reload(constants_mod)
+
+
+def test_memory_api_base_derived_strips_trailing_slash(monkeypatch):
+    import importlib
+
+    import bot.constants as constants_mod
+
+    monkeypatch.delenv("MEMORY_API_URL", raising=False)
+    monkeypatch.setenv("BOT_MEMORY_URL", "http://memory-server:8080/mcp/")
+    importlib.reload(constants_mod)
+    assert constants_mod.MEMORY_API_BASE == "http://memory-server:8080/api"
+    monkeypatch.delenv("BOT_MEMORY_URL")
+    importlib.reload(constants_mod)
+
+
 def test_memory_api_base_default(monkeypatch):
     import importlib
 
     import bot.constants as constants_mod
 
     monkeypatch.delenv("MEMORY_API_URL", raising=False)
+    monkeypatch.delenv("BOT_MEMORY_URL", raising=False)
     importlib.reload(constants_mod)
     assert constants_mod.MEMORY_API_BASE == "http://localhost:8080/api"
     importlib.reload(constants_mod)

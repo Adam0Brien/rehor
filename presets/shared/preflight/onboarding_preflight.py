@@ -9,6 +9,7 @@ Returns start when there's actionable work:
 """
 
 import os
+import re
 
 from common import (
     INSTANCE_ID,
@@ -23,6 +24,8 @@ from common import (
 from jira_mcp import jira_call, jira_cleanup
 
 BOT_LABEL = os.environ.get("BOT_LABEL", "")
+if BOT_LABEL and not re.match(r"^[a-zA-Z0-9:_-]+$", BOT_LABEL):
+    raise ValueError(f"Invalid BOT_LABEL: {BOT_LABEL!r}")
 BOT_JIRA_EMAIL = os.environ.get("BOT_JIRA_EMAIL", "")
 
 
@@ -65,7 +68,7 @@ def _get_candidates():
         return []
 
     jql = (
-        f'labels = "{BOT_LABEL}" AND status in ("New", "Backlog", "To Do", "Open") '
+        f'project = REHOR AND labels = "{BOT_LABEL}" AND status in ("New", "Backlog", "To Do", "Open") '
         f"AND assignee is EMPTY "
         f"ORDER BY priority DESC, created ASC"
     )
@@ -75,12 +78,22 @@ def _get_candidates():
     return result.get("issues", [])
 
 
+BLOCKED_LABEL = "onboarding:blocked"
+
+
+def _is_blocked(issue):
+    if not issue:
+        return False
+    labels = issue.get("labels", [])
+    return BLOCKED_LABEL in labels
+
+
 def _get_onboarding_label(issue):
     if not issue:
         return None
     labels = issue.get("labels", [])
     for lbl in labels:
-        if lbl.startswith("onboarding:"):
+        if lbl.startswith("onboarding:") and lbl != BLOCKED_LABEL:
             return lbl
     return None
 
@@ -116,6 +129,12 @@ def main():
         meta = task.get("metadata") or {}
 
         issue = _jira_issue(key)
+
+        if _is_blocked(issue):
+            task_lines.append("  *** BLOCKED — requires Rehor team intervention, skipping ***")
+            lines.append("\n".join(task_lines))
+            continue
+
         onboarding_label = _get_onboarding_label(issue) if issue else None
         step_from_label = onboarding_label.split(":", 1)[1] if onboarding_label else meta.get("step", "unknown")
         task_lines.append(f"  onboarding_step: {step_from_label} (label: {onboarding_label or 'none'})")

@@ -27,21 +27,27 @@ Phase 1 is complete! Now let's set up Konflux CI/CD for your instance.
 Do you have an existing Konflux tenant, or should I create a new one? \
 Fill in **one** of the two sections below.
 
+---
+
 ### Existing tenant — adding a component
 
 **Required**
 - **Tenant name** — your existing tenant namespace
 
 **Optional** (defaults applied if not specified)
-- Cluster — default: `kflux-prd-rh02`
 - Quay org — default: same as tenant name. \
 Determines your image URL: `quay.io/redhat-services-prod/<quay_org>/{instance_name}`
+
+- Cluster — auto-detected from your existing tenant. If your tenant spans multiple clusters, specify which one to use.
+
+---
 
 ### New tenant — full setup
 
 **Required**
-- **Admin usernames** — SSO/Kerberos usernames for admin access (e.g., `jdoe`)
-- **Maintainer usernames** — SSO/Kerberos usernames for maintainer access
+- **Admin usernames** — SSO/Kerberos usernames for namespace admin RBAC access (e.g., `jdoe`). \
+Admins will also be set as maintainers and codeowners initially. \
+You can update these roles separately in the MR if needed.
 - **Cost center** — your team's cost center
 
 **Optional** (defaults applied if not specified)

@@ -176,6 +176,44 @@ def test_active_with_feedback_returns_start(env_vars, monkeypatch, capsys):
             "status": {"name": "In Progress"},
             "labels": [],
             "issuelinks": [],
+        },
+        "comments": [
+            {
+                "created": "2026-07-01T10:00:00",
+                "body": "Can you check this?",
+                "author": {"displayName": "Human"},
+            }
+        ],
+    }
+    monkeypatch.setattr("jira_kanban_preflight.get_tasks", lambda: tasks)
+    monkeypatch.setattr("jira_kanban_preflight.get_capacity", lambda: (1, 10))
+    monkeypatch.setattr("jira_kanban_preflight._jira_issue", lambda key: jira_data)
+    monkeypatch.setattr("jira_kanban_preflight.jira_cleanup", lambda: None)
+
+    main()
+    out = json.loads(capsys.readouterr().out.strip())
+    assert out["status"] == "start"
+    assert "JIRA FEEDBACK" in out["content"]
+
+
+def test_active_with_feedback_legacy_path(env_vars, monkeypatch, capsys):
+    """Fallback: comments under fields.comment.comments still works."""
+    tasks = _mock_tasks(
+        active=[
+            {
+                "external_key": "LCORE-2b",
+                "status": "pr_open",
+                "repo": "lightspeed-stack",
+                "last_addressed": "2026-06-30T10:00:00",
+                "metadata": {"prs": [{"repo": "lightspeed-stack", "number": 1, "host": "github"}]},
+            }
+        ]
+    )
+    jira_data = {
+        "fields": {
+            "status": {"name": "In Progress"},
+            "labels": [],
+            "issuelinks": [],
             "comment": {
                 "comments": [
                     {

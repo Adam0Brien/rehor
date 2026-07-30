@@ -42,7 +42,7 @@ def _jira_issue(key):
         "jira_get_issue",
         {
             "issue_key": key,
-            "fields": "summary,status,assignee,labels,issuelinks",
+            "fields": "summary,status,assignee,labels,issuelinks,comment",
             "comment_limit": 10,
         },
     )
@@ -274,7 +274,9 @@ def main():
             jira = _jira_issue(key) if key else None
             jira_comments = []
             if jira:
-                jira_comments = (jira.get("fields", {}).get("comment", {}).get("comments") or [])[-10:]
+                jira_comments = (
+                    jira.get("comments") or jira.get("fields", {}).get("comment", {}).get("comments") or []
+                )[-10:]
 
             is_interrupted = (
                 t.get("status") == "in_progress"

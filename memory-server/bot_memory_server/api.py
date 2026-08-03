@@ -1252,7 +1252,7 @@ async def api_cycle_runs_by_task(request: Request) -> JSONResponse:
                 "last_cycle": r["last_cycle"].isoformat() if r["last_cycle"] else None,
             }
         )
-    return JSONResponse(groups)
+    return JSONResponse({"items": groups, "total": len(groups)})
 
 
 async def api_instance_wake_trigger(request: Request) -> JSONResponse:

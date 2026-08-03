@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from bot_memory_server.api import api_cycle_run_transcript, api_cycle_runs
+from bot_memory_server.api import api_cycle_run_transcript, api_cycle_runs, api_cycle_runs_by_task
 from httpx import ASGITransport, AsyncClient
 from starlette.applications import Starlette
 from starlette.routing import Route
@@ -14,6 +14,7 @@ from starlette.routing import Route
 app = Starlette(
     routes=[
         Route("/api/cycle-runs", api_cycle_runs, methods=["GET", "POST"]),
+        Route("/api/cycle-runs/by-task", api_cycle_runs_by_task, methods=["GET"]),
         Route(
             "/api/cycle-runs/{id}/transcript",
             api_cycle_run_transcript,
@@ -44,6 +45,24 @@ def _fake_cycle_run_row(id=1, task_id=42, **kwargs):
         "progress": kwargs.get("progress", json.dumps({"last_step": "implemented"})),
         "created_at": kwargs.get("created_at", now),
         "has_transcript": kwargs.get("has_transcript", False),
+    }
+
+
+def _fake_by_task_row(**kwargs):
+    now = datetime.now(timezone.utc)
+    return {
+        "task_id": kwargs.get("task_id", 42),
+        "external_key": kwargs.get("external_key", "RHCLOUD-100"),
+        "source_type": kwargs.get("source_type", "jira"),
+        "title": kwargs.get("title", "Fix login"),
+        "task_status": kwargs.get("task_status", "in_progress"),
+        "repo": kwargs.get("repo", "test-repo"),
+        "cycle_count": kwargs.get("cycle_count", 3),
+        "transcript_count": kwargs.get("transcript_count", 1),
+        "total_tool_calls": kwargs.get("total_tool_calls", 100),
+        "total_tokens": kwargs.get("total_tokens", 250000),
+        "first_cycle": kwargs.get("first_cycle", now),
+        "last_cycle": kwargs.get("last_cycle", now),
     }
 
 
@@ -226,6 +245,34 @@ async def test_get_cycle_runs_filter_by_cycle_type(mock_pool):
     call_args = mock_pool.fetch.call_args
     query = call_args[0][0]
     assert "cycle_type = $" in query
+
+
+@pytest.mark.asyncio
+async def test_get_cycle_runs_by_task_returns_paginated(mock_pool):
+    """REHOR-79: by-task endpoint must return {items, total}, not a plain array."""
+    mock_pool.fetch = AsyncMock(return_value=[_fake_by_task_row(), _fake_by_task_row(external_key="RHCLOUD-200")])
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get("/api/cycle-runs/by-task")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "items" in data
+    assert "total" in data
+    assert data["total"] == 2
+    assert len(data["items"]) == 2
+    assert data["items"][0]["external_key"] == "RHCLOUD-100"
+
+
+@pytest.mark.asyncio
+async def test_get_cycle_runs_by_task_empty(mock_pool):
+    mock_pool.fetch = AsyncMock(return_value=[])
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get("/api/cycle-runs/by-task")
+
+    data = resp.json()
+    assert data == {"items": [], "total": 0}
 
 
 @pytest.mark.asyncio

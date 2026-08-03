@@ -6,7 +6,6 @@ capture them by registering into a real FastMCP instance and pulling
 them out of its internal registry.
 """
 
-import os
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -79,7 +78,6 @@ class TestSlackNotifyImmediate:
 
         with (
             patch("bot_memory_server.tools.slack.get_pool", return_value=pool),
-            patch.dict(os.environ, {"SLACK_NOTIFY_MODE": "immediate"}),
             patch("bot_memory_server.tools.slack.httpx.AsyncClient") as mock_client_class,
             patch("bot_memory_server.tools.slack.bus", new_callable=AsyncMock),
         ):
@@ -113,7 +111,6 @@ class TestSlackNotifyImmediate:
 
         with (
             patch("bot_memory_server.tools.slack.get_pool", return_value=pool),
-            patch.dict(os.environ, {"SLACK_NOTIFY_MODE": "immediate"}),
         ):
             result = await slack_notify(
                 external_key="RHCLOUD-100",
@@ -148,7 +145,6 @@ class TestSlackNotifyImmediate:
 
         with (
             patch("bot_memory_server.tools.slack.get_pool", return_value=pool),
-            patch.dict(os.environ, {"SLACK_NOTIFY_MODE": "immediate"}),
             patch("bot_memory_server.tools.slack.httpx.AsyncClient") as mock_client_class,
         ):
             mock_client = AsyncMock()
@@ -177,15 +173,13 @@ class TestSlackNotifyDigest:
         slack_notify = slack_tools["slack_notify"]
         pool = _make_pool(fetchrow_return=None)
 
-        with (
-            patch("bot_memory_server.tools.slack.get_pool", return_value=pool),
-            patch.dict(os.environ, {"SLACK_NOTIFY_MODE": "daily_digest", "SLACK_DIGEST_HOUR": "9"}),
-        ):
+        with patch("bot_memory_server.tools.slack.get_pool", return_value=pool):
             result = await slack_notify(
                 external_key="RHCLOUD-200",
                 event_type="pr_created",
                 message="New PR: #99",
                 webhook_url="https://hooks.slack.com/test",
+                notify_mode="daily_digest",
                 instance_id="framework-1",
                 pr_url="https://github.com/org/repo/pull/99",
                 pr_number=99,
@@ -210,21 +204,20 @@ class TestSlackNotifyDigest:
         slack_notify = slack_tools["slack_notify"]
         pool = _make_pool(fetchrow_return=None)
 
-        with (
-            patch("bot_memory_server.tools.slack.get_pool", return_value=pool),
-            patch.dict(os.environ, {"SLACK_NOTIFY_MODE": "daily_digest", "SLACK_DIGEST_HOUR": "9"}),
-        ):
+        with patch("bot_memory_server.tools.slack.get_pool", return_value=pool):
             r1 = await slack_notify(
                 external_key="RHCLOUD-300",
                 event_type="pr_created",
                 message="First",
                 webhook_url="https://hooks.slack.com/test",
+                notify_mode="daily_digest",
             )
             r2 = await slack_notify(
                 external_key="RHCLOUD-300",
                 event_type="review_reminder",
                 message="Second",
                 webhook_url="https://hooks.slack.com/test",
+                notify_mode="daily_digest",
             )
 
         assert r1["queued"] is True
@@ -237,15 +230,13 @@ class TestSlackNotifyDigest:
         slack_notify = slack_tools["slack_notify"]
         pool = _make_pool(fetchrow_return={"id": 99})
 
-        with (
-            patch("bot_memory_server.tools.slack.get_pool", return_value=pool),
-            patch.dict(os.environ, {"SLACK_NOTIFY_MODE": "daily_digest", "SLACK_DIGEST_HOUR": "9"}),
-        ):
+        with patch("bot_memory_server.tools.slack.get_pool", return_value=pool):
             result = await slack_notify(
                 external_key="RHCLOUD-300",
                 event_type="pr_created",
                 message="Duplicate",
                 webhook_url="https://hooks.slack.com/test",
+                notify_mode="daily_digest",
             )
 
         assert result["queued"] is False

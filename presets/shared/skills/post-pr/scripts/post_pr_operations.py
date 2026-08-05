@@ -532,6 +532,7 @@ class PostPROperations:
                         "event_type": "pr_created",
                         "message": message,
                         "webhook_url": self.slack_webhook,
+                        "notify_mode": os.environ.get("SLACK_NOTIFY_MODE", "immediate"),
                         "pr_url": pr_url,
                         "pr_number": pr_number,
                         "repo": repo,

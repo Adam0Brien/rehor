@@ -82,6 +82,8 @@ def mock_pool():
 
 @pytest.mark.asyncio
 async def test_post_cycle_run_basic(mock_pool):
+    # UPDATE (no orphan found → None), then INSERT
+    mock_pool.fetchrow = AsyncMock(side_effect=[None, _fake_cycle_run_row(id=1, task_id=42)])
     body = {
         "task_id": 42,
         "cycle_type": "task_work",
@@ -97,7 +99,7 @@ async def test_post_cycle_run_basic(mock_pool):
     assert data["id"] == 1
     assert data["task_id"] == 42
     assert data["cycle_type"] == "task_work"
-    mock_pool.fetchrow.assert_called_once()
+    assert mock_pool.fetchrow.call_count == 2
 
 
 @pytest.mark.asyncio
@@ -179,6 +181,8 @@ async def test_post_cycle_run_no_task(mock_pool):
 
 @pytest.mark.asyncio
 async def test_post_cycle_run_with_timestamps(mock_pool):
+    # UPDATE (no orphan found → None), then INSERT
+    mock_pool.fetchrow = AsyncMock(side_effect=[None, _fake_cycle_run_row(id=1, task_id=42)])
     body = {
         "task_id": 42,
         "cycle_type": "task_work",
@@ -193,9 +197,82 @@ async def test_post_cycle_run_with_timestamps(mock_pool):
         resp = await client.post("/api/cycle-runs", json=body)
 
     assert resp.status_code == 201
+    # call_args is from the INSERT call (UPDATE returned None, INSERT was second)
     call_args = mock_pool.fetchrow.call_args[0]
-    assert call_args[6] == 87  # tool_calls
-    assert call_args[7] == 150000  # tokens_used
+    assert call_args[6] == 87  # tool_calls ($6 in INSERT)
+    assert call_args[7] == 150000  # tokens_used ($7 in INSERT)
+
+
+# --- REST API: POST /api/cycle-runs — merge without transcript (REHOR-102) ---
+
+
+@pytest.mark.asyncio
+async def test_post_cycle_run_no_transcript_merges_into_orphan(mock_pool):
+    """REHOR-102: When record_transcript posts without a transcript (file not found),
+    it should still UPDATE the existing progress_store row instead of creating a duplicate."""
+    # UPDATE finds the orphan → returns updated row
+    mock_pool.fetchrow = AsyncMock(return_value=_fake_cycle_run_row(id=50, task_id=42, has_transcript=False))
+
+    body = {
+        "task_id": 42,
+        "cycle_type": "task_work",
+        "instance_id": "test-instance",
+        "tool_calls": 30,
+        "tokens_used": 80000,
+    }
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post("/api/cycle-runs", json=body)
+
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["id"] == 50
+    assert mock_pool.fetchrow.call_count == 1
+    query = mock_pool.fetchrow.call_args[0][0]
+    assert "UPDATE cycle_runs" in query
+    assert "COALESCE($1, transcript)" in query
+
+
+@pytest.mark.asyncio
+async def test_post_cycle_run_no_transcript_no_orphan_inserts(mock_pool):
+    """REHOR-102: When no orphan exists and no transcript provided, fall through to INSERT."""
+    mock_pool.fetchrow = AsyncMock(side_effect=[None, _fake_cycle_run_row(id=51, task_id=42)])
+
+    body = {
+        "task_id": 42,
+        "cycle_type": "task_work",
+        "instance_id": "test-instance",
+        "tool_calls": 25,
+        "tokens_used": 60000,
+    }
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post("/api/cycle-runs", json=body)
+
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["id"] == 51
+    assert mock_pool.fetchrow.call_count == 2
+    insert_query = mock_pool.fetchrow.call_args[0][0]
+    assert "INSERT INTO cycle_runs" in insert_query
+
+
+@pytest.mark.asyncio
+async def test_post_cycle_run_no_instance_id_skips_update(mock_pool):
+    """Without instance_id, skip the UPDATE path entirely and INSERT directly."""
+    mock_pool.fetchrow = AsyncMock(return_value=_fake_cycle_run_row(id=52, task_id=None, cycle_type="idle"))
+
+    body = {
+        "cycle_type": "idle",
+    }
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post("/api/cycle-runs", json=body)
+
+    assert resp.status_code == 201
+    assert mock_pool.fetchrow.call_count == 1
+    query = mock_pool.fetchrow.call_args[0][0]
+    assert "INSERT INTO cycle_runs" in query
 
 
 # --- REST API: GET /api/cycle-runs ---

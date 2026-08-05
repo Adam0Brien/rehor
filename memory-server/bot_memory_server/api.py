@@ -1067,15 +1067,16 @@ async def api_cycle_runs_add(request: Request) -> JSONResponse:
     instance_id_val = body.get("instance_id")
     input_prompt = body.get("input_prompt")
 
-    # When uploading a transcript, attach it to the most recent cycle_run
-    # for this specific instance that has no transcript yet (created by
-    # progress_store during the same cycle).
+    # Attach metadata (and optional transcript) to the most recent cycle_run
+    # for this instance that has no transcript yet (created by progress_store
+    # during the same cycle). If no transcript is available, still merge the
+    # metadata so we don't create a duplicate cycle_run.
     row = None
-    if transcript_bytes and instance_id_val:
+    if instance_id_val:
         row = await pool.fetchrow(
             f"""
             UPDATE cycle_runs
-            SET transcript = $1,
+            SET transcript = COALESCE($1, transcript),
                 finished_at = COALESCE($2, finished_at, NOW()),
                 tool_calls = COALESCE($3, tool_calls),
                 tokens_used = COALESCE($4, tokens_used),

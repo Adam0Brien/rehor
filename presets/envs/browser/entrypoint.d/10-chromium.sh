@@ -1,6 +1,12 @@
 #!/bin/bash
 # Start headless Chromium for chrome-devtools MCP
 
+# Map SSO credentials to E2E vars (used by Playwright global-setup)
+if [ -n "${SSO_USERNAME:-}" ] && [ -z "${E2E_USER:-}" ]; then
+    export E2E_USER="$SSO_USERNAME"
+    export E2E_PASSWORD="$SSO_PASSWORD"
+fi
+
 # Load extra hosts from instance config (e.g. instance/<name>/agent/extra-hosts)
 # Standard /etc/hosts format — one entry per line:
 #   127.0.0.1    stage.foo.redhat.com

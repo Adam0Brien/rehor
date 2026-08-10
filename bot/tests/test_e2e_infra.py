@@ -13,7 +13,6 @@ import textwrap
 
 import pytest
 
-
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
@@ -88,7 +87,10 @@ class TestAlignPlaywrightBrowsers:
         }
         result = subprocess.run(
             ["bash", str(align_script), str(repo)],
-            capture_output=True, text=True, env=env, timeout=10,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=10,
         )
         assert result.returncode == 0
         assert "Versions match" in result.stdout
@@ -108,7 +110,10 @@ class TestAlignPlaywrightBrowsers:
         }
         result = subprocess.run(
             ["bash", str(align_script), str(repo)],
-            capture_output=True, text=True, env=env, timeout=10,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=10,
         )
         assert result.returncode == 0
         assert "Aligning" in result.stdout
@@ -131,7 +136,10 @@ class TestAlignPlaywrightBrowsers:
         }
         result = subprocess.run(
             ["bash", str(align_script), str(repo)],
-            capture_output=True, text=True, env=env, timeout=10,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=10,
         )
         assert result.returncode == 1
         assert "Could not determine" in result.stderr
@@ -162,7 +170,10 @@ class TestChromiumCredentialMapping:
         env = {"SSO_USERNAME": "testuser", "SSO_PASSWORD": "secret123"}
         result = subprocess.run(
             ["bash", str(credential_script)],
-            capture_output=True, text=True, env=env, timeout=5,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=5,
         )
         assert "E2E_USER=testuser" in result.stdout
         assert "E2E_PASSWORD=secret123" in result.stdout
@@ -176,7 +187,10 @@ class TestChromiumCredentialMapping:
         }
         result = subprocess.run(
             ["bash", str(credential_script)],
-            capture_output=True, text=True, env=env, timeout=5,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=5,
         )
         assert "E2E_USER=explicit-user" in result.stdout
         assert "E2E_PASSWORD=explicit-pass" in result.stdout
@@ -185,7 +199,10 @@ class TestChromiumCredentialMapping:
         env = {"HOME": "/tmp"}
         result = subprocess.run(
             ["bash", str(credential_script)],
-            capture_output=True, text=True, env=env, timeout=5,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=5,
         )
         assert "E2E_USER=unset" in result.stdout
 
@@ -221,7 +238,8 @@ class TestExtraHostsLoading:
 
         subprocess.run(
             ["bash", str(hosts_script), str(hosts_file), str(output)],
-            timeout=5, check=True,
+            timeout=5,
+            check=True,
         )
         content = output.read_text()
         assert "127.0.0.1 stage.foo.redhat.com" in content
@@ -234,7 +252,8 @@ class TestExtraHostsLoading:
 
         subprocess.run(
             ["bash", str(hosts_script), str(hosts_file), str(output)],
-            timeout=5, check=True,
+            timeout=5,
+            check=True,
         )
         content = output.read_text()
         assert "full comment" not in content
@@ -247,9 +266,10 @@ class TestExtraHostsLoading:
 
         subprocess.run(
             ["bash", str(hosts_script), str(hosts_file), str(output)],
-            timeout=5, check=True,
+            timeout=5,
+            check=True,
         )
-        lines = [l for l in output.read_text().strip().split("\n") if l.strip()]
+        lines = [line for line in output.read_text().strip().split("\n") if line.strip()]
         assert len(lines) == 2
 
 
@@ -269,10 +289,15 @@ class TestDevProxyInstall:
         path = tmp_path / "check-go.sh"
         path.write_text(script)
 
-        env = {"PATH": "/usr/bin:/bin"}
+        empty_bin = tmp_path / "empty-bin"
+        empty_bin.mkdir()
+        env = {"PATH": str(empty_bin)}
         result = subprocess.run(
-            ["bash", str(path)],
-            capture_output=True, text=True, env=env, timeout=5,
+            ["/bin/bash", str(path)],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=5,
         )
         assert result.returncode == 1
         assert "go not found" in result.stderr
@@ -298,8 +323,8 @@ class TestSquidPlaywrightAllowlist:
 
     def test_no_direct_anthropic_in_allowlist(self, squid_conf):
         lines = [
-            l.strip()
-            for l in squid_conf.splitlines()
-            if l.strip().startswith("acl allowed_domains") and "anthropic" in l.lower()
+            line.strip()
+            for line in squid_conf.splitlines()
+            if line.strip().startswith("acl allowed_domains") and "anthropic" in line.lower()
         ]
         assert len(lines) == 0, "Anthropic API should not be in allowed_domains (goes via Vertex AI)"

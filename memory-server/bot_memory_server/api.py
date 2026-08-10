@@ -778,7 +778,6 @@ async def _api_costs_add(request: Request) -> JSONResponse:
         output_tokens=cycle["output_tokens"],
         cache_read_tokens=cycle["cache_read_tokens"],
         cache_write_tokens=cycle["cache_write_tokens"],
-        duration_seconds=(cycle["duration_ms"] or 0) / 1000,
     )
 
     await bus.publish(Event("cycle_recorded", cycle))

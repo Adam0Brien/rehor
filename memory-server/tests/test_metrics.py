@@ -36,9 +36,6 @@ def _fresh_registry(monkeypatch):
         m, "CYCLE_CACHE_WRITE_TOKENS_TOTAL", _counter("devbot_cycle_cache_write_tokens_total", "", ["model", "label"])
     )
     monkeypatch.setattr(m, "CYCLES_TOTAL", _counter("devbot_cycles_total", "", ["model", "label", "status"]))
-    monkeypatch.setattr(
-        m, "CYCLE_DURATION_SECONDS_TOTAL", _counter("devbot_cycle_duration_seconds_total", "", ["model", "label"])
-    )
     monkeypatch.setattr(m, "DB_COST_USD", _gauge("devbot_db_cost_usd", "", ["model", "label"]))
     monkeypatch.setattr(m, "DB_INPUT_TOKENS", _gauge("devbot_db_input_tokens", "", ["model", "label"]))
     monkeypatch.setattr(m, "DB_OUTPUT_TOKENS", _gauge("devbot_db_output_tokens", "", ["model", "label"]))
@@ -51,7 +48,6 @@ class TestRecordCycle:
     def test_increments_all_counters(self):
         from bot_memory_server.metrics import (
             CYCLE_COST_USD_TOTAL,
-            CYCLE_DURATION_SECONDS_TOTAL,
             CYCLE_INPUT_TOKENS_TOTAL,
             CYCLE_OUTPUT_TOKENS_TOTAL,
             CYCLES_TOTAL,
@@ -67,14 +63,12 @@ class TestRecordCycle:
             output_tokens=50,
             cache_read_tokens=20,
             cache_write_tokens=10,
-            duration_seconds=60.0,
         )
 
         assert CYCLE_COST_USD_TOTAL.labels(model="claude-opus-4", label="test-label")._value.get() == 1.50
         assert CYCLE_INPUT_TOKENS_TOTAL.labels(model="claude-opus-4", label="test-label")._value.get() == 100
         assert CYCLE_OUTPUT_TOKENS_TOTAL.labels(model="claude-opus-4", label="test-label")._value.get() == 50
         assert CYCLES_TOTAL.labels(model="claude-opus-4", label="test-label", status="ok")._value.get() == 1
-        assert CYCLE_DURATION_SECONDS_TOTAL.labels(model="claude-opus-4", label="test-label")._value.get() == 60.0
 
     def test_none_values_default_to_zero(self):
         from bot_memory_server.metrics import (
@@ -92,7 +86,6 @@ class TestRecordCycle:
             output_tokens=None,
             cache_read_tokens=None,
             cache_write_tokens=None,
-            duration_seconds=None,
         )
 
         assert CYCLE_COST_USD_TOTAL.labels(model="claude-opus-4", label="test-label")._value.get() == 0
@@ -110,7 +103,6 @@ class TestRecordCycle:
             output_tokens=0,
             cache_read_tokens=0,
             cache_write_tokens=0,
-            duration_seconds=0,
         )
 
         assert CYCLES_TOTAL.labels(model="unknown", label="unknown", status="error")._value.get() == 1
@@ -128,7 +120,6 @@ class TestRecordCycle:
                 output_tokens=5,
                 cache_read_tokens=2,
                 cache_write_tokens=1,
-                duration_seconds=30.0,
             )
 
         assert CYCLE_COST_USD_TOTAL.labels(model="claude-opus-4", label="test-label")._value.get() == 3.0

@@ -55,11 +55,6 @@ CYCLES_TOTAL = Counter(
     "Cycle count",
     ["model", "label", "status"],
 )
-CYCLE_DURATION_SECONDS_TOTAL = Counter(
-    "devbot_cycle_duration_seconds_total",
-    "Cumulative wall-clock time",
-    ["model", "label"],
-)
 
 
 def record_cycle(
@@ -72,7 +67,6 @@ def record_cycle(
     output_tokens: int,
     cache_read_tokens: int,
     cache_write_tokens: int,
-    duration_seconds: float,
 ) -> None:
     """Increment real-time cycle counters. Call on every POST /api/costs."""
     model = model or "unknown"
@@ -84,7 +78,6 @@ def record_cycle(
     CYCLE_CACHE_READ_TOKENS_TOTAL.labels(model=model, label=label).inc(cache_read_tokens or 0)
     CYCLE_CACHE_WRITE_TOKENS_TOTAL.labels(model=model, label=label).inc(cache_write_tokens or 0)
     CYCLES_TOTAL.labels(model=model, label=label, status=status).inc()
-    CYCLE_DURATION_SECONDS_TOTAL.labels(model=model, label=label).inc(duration_seconds or 0)
 
 
 # --- DB-backed gauges (period totals, refreshed periodically from Postgres) ---

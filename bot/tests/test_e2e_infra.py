@@ -1,13 +1,15 @@
 """Tests for E2E infrastructure changes (REHOR-110).
 
 Covers:
-- align-playwright-browsers helper script
+- align-playwright-browsers helper script (extracted from install.sh)
 - 10-chromium.sh credential mapping and extra-hosts loading
 - dev-proxy install.sh prerequisite check
 - squid.conf playwright domain allowlist
 """
 
+import json
 import os
+import re
 import subprocess
 import textwrap
 
@@ -16,47 +18,39 @@ import pytest
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
+def _extract_heredoc(install_sh_path, marker="SCRIPT"):
+    """Extract the heredoc script from install.sh between cat > ... << 'MARKER' and MARKER."""
+    with open(install_sh_path) as f:
+        content = f.read()
+    pattern = rf"cat > [^\n]+ << '{marker}'\n(.*?)\n{marker}"
+    match = re.search(pattern, content, re.DOTALL)
+    if not match:
+        raise ValueError(f"Could not find heredoc with marker {marker} in {install_sh_path}")
+    return match.group(1)
+
+
+HAS_GREP_P = (
+    subprocess.run(
+        ["grep", "-oP", "x", "/dev/null"],
+        capture_output=True,
+    ).returncode
+    != 2
+)
+
+requires_grep_p = pytest.mark.skipif(not HAS_GREP_P, reason="grep -P not available")
+
+
+@requires_grep_p
 class TestAlignPlaywrightBrowsers:
-    """Test the align-playwright-browsers helper embedded in browser/install.sh."""
+    """Test the align-playwright-browsers helper extracted from browser/install.sh."""
 
     @pytest.fixture
     def align_script(self, tmp_path):
-        """Extract align-playwright-browsers logic with portable grep (no -P)."""
-        script = textwrap.dedent("""\
-            #!/bin/bash
-            set -e
-            REPO_DIR="${1:-.}"
-            PW_BROWSERS="${PLAYWRIGHT_BROWSERS_PATH:-/opt/pw-browsers}"
-            USER_CACHE="${HOME}/.cache/ms-playwright"
-
-            WANTED=$(cd "$REPO_DIR" && npx playwright install --dry-run 2>&1 | sed -n 's/.*chromium-\\([0-9]*\\).*/\\1/p' | head -1)
-            INSTALLED=$(ls -d "$PW_BROWSERS"/chromium-* 2>/dev/null | sed -n 's/.*chromium-\\([0-9]*\\).*/\\1/p' | head -1)
-
-            if [ -z "$WANTED" ] || [ -z "$INSTALLED" ]; then
-                echo "[align-pw] Could not determine versions (wanted=$WANTED installed=$INSTALLED)" >&2
-                exit 1
-            fi
-
-            if [ "$WANTED" = "$INSTALLED" ]; then
-                echo "[align-pw] Versions match (chromium-$INSTALLED), no alignment needed"
-                exit 0
-            fi
-
-            echo "[align-pw] Aligning: repo wants chromium-$WANTED, image has chromium-$INSTALLED"
-            mkdir -p "$USER_CACHE"
-            for dir in "$PW_BROWSERS"/*/; do
-                base=$(basename "$dir")
-                target_name=$(echo "$base" | sed "s/-${INSTALLED}/-${WANTED}/")
-                if [ "$base" != "$target_name" ]; then
-                    ln -sfn "$dir" "$USER_CACHE/$target_name"
-                    echo "[align-pw] Linked $target_name -> $dir"
-                else
-                    ln -sfn "$dir" "$USER_CACHE/$base"
-                fi
-            done
-        """)
+        """Extract the actual align-playwright-browsers script from install.sh."""
+        install_sh = os.path.join(REPO_ROOT, "presets", "envs", "browser", "install.sh")
+        script_body = _extract_heredoc(install_sh, "SCRIPT")
         script_path = tmp_path / "align-playwright-browsers"
-        script_path.write_text(script)
+        script_path.write_text(script_body)
         script_path.chmod(0o755)
         return script_path
 
@@ -146,17 +140,20 @@ class TestAlignPlaywrightBrowsers:
 
 
 class TestChromiumCredentialMapping:
-    """Test E2E credential mapping in 10-chromium.sh."""
+    """Test E2E credential mapping from .credentials file in 10-chromium.sh."""
 
     @pytest.fixture
     def credential_script(self, tmp_path):
-        """Extract just the credential mapping portion."""
+        """Extract the credential mapping logic that reads from .credentials."""
         script = textwrap.dedent("""\
             #!/bin/bash
-            # Map SSO credentials to E2E vars (used by Playwright global-setup)
-            if [ -n "${SSO_USERNAME:-}" ] && [ -z "${E2E_USER:-}" ]; then
-                export E2E_USER="$SSO_USERNAME"
-                export E2E_PASSWORD="$SSO_PASSWORD"
+            CRED_FILE="${CRED_FILE_PATH:-/home/botuser/app/.credentials}"
+            if [ -z "${E2E_USER:-}" ] && [ -f "$CRED_FILE" ]; then
+                E2E_USER=$(python3 -c "import json,sys; d=json.load(open('$CRED_FILE')); print(d['sso']['username'])" 2>/dev/null)
+                E2E_PASSWORD=$(python3 -c "import json,sys; d=json.load(open('$CRED_FILE')); print(d['sso']['password'])" 2>/dev/null)
+                if [ -n "$E2E_USER" ]; then
+                    export E2E_USER E2E_PASSWORD
+                fi
             fi
             echo "E2E_USER=${E2E_USER:-unset}"
             echo "E2E_PASSWORD=${E2E_PASSWORD:-unset}"
@@ -166,8 +163,10 @@ class TestChromiumCredentialMapping:
         path.chmod(0o755)
         return path
 
-    def test_sso_mapped_when_e2e_unset(self, credential_script):
-        env = {"SSO_USERNAME": "testuser", "SSO_PASSWORD": "secret123"}
+    def test_reads_from_credentials_file(self, credential_script, tmp_path):
+        cred_file = tmp_path / ".credentials"
+        cred_file.write_text(json.dumps({"sso": {"username": "testuser", "password": "secret123"}}))
+        env = {"HOME": str(tmp_path), "CRED_FILE_PATH": str(cred_file)}
         result = subprocess.run(
             ["bash", str(credential_script)],
             capture_output=True,
@@ -178,10 +177,12 @@ class TestChromiumCredentialMapping:
         assert "E2E_USER=testuser" in result.stdout
         assert "E2E_PASSWORD=secret123" in result.stdout
 
-    def test_e2e_not_overwritten_when_already_set(self, credential_script):
+    def test_e2e_not_overwritten_when_already_set(self, credential_script, tmp_path):
+        cred_file = tmp_path / ".credentials"
+        cred_file.write_text(json.dumps({"sso": {"username": "sso-user", "password": "sso-pass"}}))
         env = {
-            "SSO_USERNAME": "sso-user",
-            "SSO_PASSWORD": "sso-pass",
+            "HOME": str(tmp_path),
+            "CRED_FILE_PATH": str(cred_file),
             "E2E_USER": "explicit-user",
             "E2E_PASSWORD": "explicit-pass",
         }
@@ -195,8 +196,8 @@ class TestChromiumCredentialMapping:
         assert "E2E_USER=explicit-user" in result.stdout
         assert "E2E_PASSWORD=explicit-pass" in result.stdout
 
-    def test_no_sso_no_mapping(self, credential_script):
-        env = {"HOME": "/tmp"}
+    def test_no_credentials_file_no_mapping(self, credential_script, tmp_path):
+        env = {"HOME": str(tmp_path), "CRED_FILE_PATH": str(tmp_path / "nonexistent")}
         result = subprocess.run(
             ["bash", str(credential_script)],
             capture_output=True,

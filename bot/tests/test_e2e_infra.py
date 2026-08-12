@@ -145,28 +145,33 @@ class TestChromiumCredentialMapping:
     @pytest.fixture
     def credential_script(self, tmp_path):
         """Extract the credential mapping logic that reads from .credentials."""
-        script = textwrap.dedent("""\
-            #!/bin/bash
-            CRED_FILE="${CRED_FILE_PATH:-/home/botuser/app/.credentials}"
-            if [ -z "${E2E_USER:-}" ] && [ -f "$CRED_FILE" ]; then
-                E2E_USER=$(python3 -c "import json,sys; d=json.load(open('$CRED_FILE')); print(d['sso']['username'])" 2>/dev/null)
-                E2E_PASSWORD=$(python3 -c "import json,sys; d=json.load(open('$CRED_FILE')); print(d['sso']['password'])" 2>/dev/null)
-                if [ -n "$E2E_USER" ]; then
-                    export E2E_USER E2E_PASSWORD
-                fi
-            fi
-            echo "E2E_USER=${E2E_USER:-unset}"
-            echo "E2E_PASSWORD=${E2E_PASSWORD:-unset}"
-        """)
+        original_path = "presets/envs/browser/entrypoint.d/10-chromium.sh"
+        loaded_path = os.path.join(REPO_ROOT, original_path)
+        if not os.path.exists(loaded_path):
+            raise FileNotFoundError(f"Could not find {original_path} in repo root {REPO_ROOT}")
+
+        loaded_content = ""
+        with open(loaded_path) as f:
+            loaded_content = f.read()
+        extracted_content = re.search(
+            r"(?s)(# BEGIN CREDENTIAL MAPPING.*?# END CREDENTIAL MAPPING)",
+            loaded_content,
+        )
+        if not extracted_content:
+            raise ValueError(f"Could not extract credential mapping from {loaded_path}")
+        loaded_content = extracted_content.group(1)
+        # The extracted snippet only exports; append echoes so the subprocess
+        # surfaces the resulting values on stdout for assertions.
+        loaded_content += '\necho "E2E_USER=${E2E_USER:-unset}"\necho "E2E_PASSWORD=${E2E_PASSWORD:-unset}"\n'
         path = tmp_path / "cred-map.sh"
-        path.write_text(script)
+        path.write_text(loaded_content)
         path.chmod(0o755)
         return path
 
     def test_reads_from_credentials_file(self, credential_script, tmp_path):
         cred_file = tmp_path / ".credentials"
         cred_file.write_text(json.dumps({"sso": {"username": "testuser", "password": "secret123"}}))
-        env = {"HOME": str(tmp_path), "CRED_FILE_PATH": str(cred_file)}
+        env = {"HOME": str(tmp_path), "CRED_FILE": str(cred_file)}
         result = subprocess.run(
             ["bash", str(credential_script)],
             capture_output=True,
@@ -182,7 +187,7 @@ class TestChromiumCredentialMapping:
         cred_file.write_text(json.dumps({"sso": {"username": "sso-user", "password": "sso-pass"}}))
         env = {
             "HOME": str(tmp_path),
-            "CRED_FILE_PATH": str(cred_file),
+            "CRED_FILE": str(cred_file),
             "E2E_USER": "explicit-user",
             "E2E_PASSWORD": "explicit-pass",
         }
@@ -197,7 +202,7 @@ class TestChromiumCredentialMapping:
         assert "E2E_PASSWORD=explicit-pass" in result.stdout
 
     def test_no_credentials_file_no_mapping(self, credential_script, tmp_path):
-        env = {"HOME": str(tmp_path), "CRED_FILE_PATH": str(tmp_path / "nonexistent")}
+        env = {"HOME": str(tmp_path), "CRED_FILE": str(tmp_path / "nonexistent")}
         result = subprocess.run(
             ["bash", str(credential_script)],
             capture_output=True,

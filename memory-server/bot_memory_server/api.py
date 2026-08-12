@@ -13,7 +13,6 @@ from starlette.responses import JSONResponse, Response
 from .db import get_pool
 from .embeddings import embed
 from .events import Event, bus
-from .metrics import record_cycle
 from .tools.tasks import ACTIVE_STATUSES
 
 logger = logging.getLogger(__name__)
@@ -762,23 +761,6 @@ async def _api_costs_add(request: Request) -> JSONResponse:
         body.get("summary"),
     )
     cycle = _cycle(row)
-
-    if cycle["is_error"]:
-        status = "error"
-    elif cycle["no_work"]:
-        status = "idle"
-    else:
-        status = "ok"
-    record_cycle(
-        model=cycle["model"],
-        label=cycle["label"],
-        status=status,
-        cost_usd=cycle["cost_usd"],
-        input_tokens=cycle["input_tokens"],
-        output_tokens=cycle["output_tokens"],
-        cache_read_tokens=cycle["cache_read_tokens"],
-        cache_write_tokens=cycle["cache_write_tokens"],
-    )
 
     await bus.publish(Event("cycle_recorded", cycle))
     return JSONResponse(cycle, status_code=201)

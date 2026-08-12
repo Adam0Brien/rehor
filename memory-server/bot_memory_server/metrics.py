@@ -23,64 +23,9 @@ REQUEST_LATENCY = Histogram(
     buckets=[0.05, 0.1, 0.25, 0.5, 0.8, 1.0, 2.5, 5.0],
 )
 
-# --- Real-time cycle counters (incremented on every POST /api/costs) ---
-
-CYCLE_COST_USD_TOTAL = Counter(
-    "devbot_cycle_cost_usd_total",
-    "Cumulative USD spend",
-    ["model", "label"],
-)
-CYCLE_INPUT_TOKENS_TOTAL = Counter(
-    "devbot_cycle_input_tokens_total",
-    "Input tokens consumed",
-    ["model", "label"],
-)
-CYCLE_OUTPUT_TOKENS_TOTAL = Counter(
-    "devbot_cycle_output_tokens_total",
-    "Output tokens consumed",
-    ["model", "label"],
-)
-CYCLE_CACHE_READ_TOKENS_TOTAL = Counter(
-    "devbot_cycle_cache_read_tokens_total",
-    "Cache read tokens",
-    ["model", "label"],
-)
-CYCLE_CACHE_WRITE_TOKENS_TOTAL = Counter(
-    "devbot_cycle_cache_write_tokens_total",
-    "Cache write tokens",
-    ["model", "label"],
-)
-CYCLES_TOTAL = Counter(
-    "devbot_cycles_total",
-    "Cycle count",
-    ["model", "label", "status"],
-)
-
-
-def record_cycle(
-    *,
-    model: str,
-    label: str,
-    status: str,
-    cost_usd: float,
-    input_tokens: int,
-    output_tokens: int,
-    cache_read_tokens: int,
-    cache_write_tokens: int,
-) -> None:
-    """Increment real-time cycle counters. Call on every POST /api/costs."""
-    model = model or "unknown"
-    label = label or "unknown"
-
-    CYCLE_COST_USD_TOTAL.labels(model=model, label=label).inc(cost_usd or 0)
-    CYCLE_INPUT_TOKENS_TOTAL.labels(model=model, label=label).inc(input_tokens or 0)
-    CYCLE_OUTPUT_TOKENS_TOTAL.labels(model=model, label=label).inc(output_tokens or 0)
-    CYCLE_CACHE_READ_TOKENS_TOTAL.labels(model=model, label=label).inc(cache_read_tokens or 0)
-    CYCLE_CACHE_WRITE_TOKENS_TOTAL.labels(model=model, label=label).inc(cache_write_tokens or 0)
-    CYCLES_TOTAL.labels(model=model, label=label, status=status).inc()
-
-
-# --- DB-backed gauges (period totals, refreshed periodically from Postgres) ---
+# --- DB-backed gauges (lifetime totals, refreshed periodically from Postgres) ---
+# Real-time cost/token counters live on the agent (REHOR-46); memory-server
+# exposes restart-safe aggregates for fleet reconciliation.
 
 DB_COST_USD = Gauge(
     "devbot_db_cost_usd",

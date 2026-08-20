@@ -13,14 +13,22 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-skills_dir = Path(__file__).parent
+repo_root = Path(__file__).resolve().parent.parent.parent
 
-for skill in ["auto-fork", "claim-ticket", "post-pr", "push-and-pr"]:
-    skill_path = str(skills_dir / skill)
-    if skill_path not in sys.path:
-        sys.path.insert(0, skill_path)
+skill_dirs = [
+    repo_root / "presets" / "shared" / "skills" / "auto-fork",
+    repo_root / "presets" / "shared" / "skills" / "post-pr",
+    repo_root / "presets" / "shared" / "skills" / "push-and-pr",
+    repo_root / "presets" / "workflows" / "jira-sprint" / "skills" / "claim-ticket",
+    repo_root / "presets" / "workflows" / "jira-kanban" / "skills" / "claim-ticket",
+]
 
-root = str(skills_dir)
+for skill_path in skill_dirs:
+    p = str(skill_path)
+    if p not in sys.path:
+        sys.path.insert(0, p)
+
+root = str(Path(__file__).parent)
 if root not in sys.path:
     sys.path.insert(0, root)
 

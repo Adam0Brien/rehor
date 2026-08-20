@@ -1,18 +1,22 @@
+import asyncio
+import contextlib
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 import uvicorn
 from fastmcp import FastMCP
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import FileResponse, HTMLResponse, JSONResponse
-from starlette.routing import Mount, WebSocketRoute
+from starlette.responses import FileResponse, HTMLResponse, JSONResponse, Response
+from starlette.routing import Mount, Route, WebSocketRoute
 from starlette.websockets import WebSocket
 
 from .db import close_pool, init_pool
 from .embeddings import load_model
 from .events import bus
+from .metrics import PrometheusMiddleware, db_gauge_refresh_loop
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -26,8 +30,12 @@ async def lifespan(app):
     load_model()
     logger.info("Connecting to database...")
     await init_pool()
+    gauge_task = asyncio.create_task(db_gauge_refresh_loop())
     logger.info("Memory server ready")
     yield
+    gauge_task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await gauge_task
     await close_pool()
 
 
@@ -36,17 +44,19 @@ mcp = FastMCP(
 )
 
 # Register MCP tools
-from .tools.tasks import register_task_tools  # noqa: E402
-from .tools.rag import register_rag_tools  # noqa: E402
-from .tools.slack import register_slack_tools  # noqa: E402
-from .tools.org_members import register_org_member_tools  # noqa: E402
-from .tools.cycles import register_cycle_tools  # noqa: E402
+from .tools.cycles import register_cycle_tools
+from .tools.konflux import register_konflux_tools
+from .tools.org_members import register_org_member_tools
+from .tools.rag import register_rag_tools
+from .tools.slack import register_slack_tools
+from .tools.tasks import register_task_tools
 
 register_task_tools(mcp)
 register_rag_tools(mcp)
 register_slack_tools(mcp)
 register_org_member_tools(mcp)
 register_cycle_tools(mcp)
+register_konflux_tools(mcp)
 
 
 # Health check
@@ -77,32 +87,36 @@ async def asset_files(request: Request) -> FileResponse:
 
 
 # REST API for the dashboard
-from .api import (  # noqa: E402
-    api_tasks,
-    api_task_delete,
-    api_task_unarchive,
+from .api import (
+    api_analytics,
+    api_bot_status,
+    api_costs,
+    api_cycle_run_transcript,
+    api_cycle_runs,
+    api_cycle_runs_by_task,
+    api_instance_get,
+    api_instance_idle_update,
+    api_instances,
     api_memories,
+    api_memory_delete,
+    api_memory_embeddings,
     api_memory_get,
     api_memory_search,
-    api_memory_embeddings,
-    api_memory_delete,
     api_memory_upload,
-    api_tags,
     api_stats,
-    api_bot_status,
-    api_instances,
-    api_instance_wake_trigger,
-    api_instance_wake_check,
-    api_costs,
-    api_analytics,
-    api_cycle_runs,
-    api_cycle_run_transcript,
-    api_cycle_runs_by_task,
+    api_tags,
+    api_task_delete,
+    api_task_pause,
+    api_task_unarchive,
+    api_task_unpause,
+    api_tasks,
 )
 
 mcp.custom_route("/api/tasks", methods=["GET"])(api_tasks)
 mcp.custom_route("/api/tasks/{key:path}", methods=["DELETE"])(api_task_delete)
 mcp.custom_route("/api/tasks/{key:path}/unarchive", methods=["POST"])(api_task_unarchive)
+mcp.custom_route("/api/tasks/{key:path}/pause", methods=["POST"])(api_task_pause)
+mcp.custom_route("/api/tasks/{key:path}/unpause", methods=["POST"])(api_task_unpause)
 mcp.custom_route("/api/memories", methods=["GET"])(api_memories)
 mcp.custom_route("/api/memories/search", methods=["GET"])(api_memory_search)
 mcp.custom_route("/api/memories/upload", methods=["POST"])(api_memory_upload)
@@ -111,8 +125,8 @@ mcp.custom_route("/api/memories/{id}", methods=["GET"])(api_memory_get)
 mcp.custom_route("/api/memories/{id}", methods=["DELETE"])(api_memory_delete)
 mcp.custom_route("/api/bot-status", methods=["GET", "POST"])(api_bot_status)
 mcp.custom_route("/api/instances", methods=["GET"])(api_instances)
-mcp.custom_route("/api/instances/{instance_id}/wake", methods=["POST"])(api_instance_wake_trigger)
-mcp.custom_route("/api/instances/{instance_id}/wake", methods=["GET"])(api_instance_wake_check)
+mcp.custom_route("/api/instances/{instance_id}", methods=["GET"])(api_instance_get)
+mcp.custom_route("/api/instances/{instance_id}/idle", methods=["PATCH"])(api_instance_idle_update)
 mcp.custom_route("/api/costs", methods=["GET", "POST"])(api_costs)
 mcp.custom_route("/api/tags", methods=["GET"])(api_tags)
 mcp.custom_route("/api/stats", methods=["GET"])(api_stats)
@@ -142,16 +156,29 @@ if __name__ == "__main__":
 
     @asynccontextmanager
     async def combined_lifespan(app):
-        async with lifespan(app):
-            async with mcp_app.lifespan(app):
-                yield
+        async with lifespan(app), mcp_app.lifespan(app):
+            yield
+
+    async def metrics_endpoint(request: Request) -> Response:
+        return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+    metrics_app = Starlette(routes=[Route("/metrics", metrics_endpoint)])
 
     # Wrap in an outer Starlette app so we can add WebSocket + lifespan
+    from starlette.middleware import Middleware
+
     app = Starlette(
         lifespan=combined_lifespan,
+        middleware=[Middleware(PrometheusMiddleware)],
         routes=[
             WebSocketRoute("/ws", ws_events),
             Mount("/", app=mcp_app),
         ],
     )
-    uvicorn.run(app, host="0.0.0.0", port=8080)
+
+    async def serve():
+        main_server = uvicorn.Server(uvicorn.Config(app, host="0.0.0.0", port=8080))
+        metrics_server = uvicorn.Server(uvicorn.Config(metrics_app, host="0.0.0.0", port=9091))
+        await asyncio.gather(main_server.serve(), metrics_server.serve())
+
+    asyncio.run(serve())

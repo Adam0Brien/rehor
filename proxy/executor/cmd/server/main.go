@@ -17,6 +17,7 @@ import (
 
 	executor "github.com/RedHatInsights/platform-frontend-ai-dev/proxy/executor"
 	pb "github.com/RedHatInsights/platform-frontend-ai-dev/proxy/executor/gen"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"google.golang.org/grpc"
 )
 
@@ -37,6 +38,12 @@ var (
 	jiraToken    = flag.String("jira-token", "", "Jira API token")
 
 	screenshotListen = flag.String("screenshot-listen", ":8446", "screenshot upload proxy listen address")
+
+	glitchtipListen = flag.String("glitchtip-listen", ":8447", "glitchtip auth proxy listen address")
+	glitchtipURL    = flag.String("glitchtip-url", "", "upstream GlitchTip URL")
+	glitchtipToken  = flag.String("glitchtip-token", "", "GlitchTip API token")
+
+	metricsListen = flag.String("metrics-listen", ":9091", "address for Prometheus /metrics endpoint (env: METRICS_LISTEN)")
 )
 
 type server struct {
@@ -56,11 +63,19 @@ func (s *server) Execute(ctx context.Context, req *pb.ExecuteRequest) (*pb.Execu
 	subcmd := extractSubcmd(args)
 	var exitCode int32
 	defer func() {
-		log.Printf("exec: tool=%s subcmd=%s exit=%d dur=%s", tool, subcmd, exitCode, time.Since(start).Round(time.Millisecond))
+		dur := time.Since(start)
+		log.Printf("exec: tool=%s subcmd=%s exit=%d dur=%s", tool, subcmd, exitCode, dur.Round(time.Millisecond))
+		code := "OK"
+		if exitCode != 0 {
+			code = "ERROR"
+		}
+		executor.GRPCRequestsTotal.WithLabelValues("Execute", code).Inc()
+		executor.GRPCRequestDuration.WithLabelValues("Execute").Observe(dur.Seconds())
 	}()
 
 	if err := s.policy.Check(tool, args); err != nil {
 		log.Printf("policy-deny: tool=%s subcmd=%s reason=%s", tool, subcmd, err)
+		executor.PolicyDenyTotal.WithLabelValues(tool).Inc()
 		exitCode = 1
 		return &pb.ExecuteResponse{
 			Stderr:   err.Error() + "\n",
@@ -220,6 +235,28 @@ func main() {
 	if v := os.Getenv("SCREENSHOT_LISTEN"); v != "" {
 		*screenshotListen = v
 	}
+	if v := os.Getenv("GLITCHTIP_LISTEN"); v != "" {
+		*glitchtipListen = v
+	}
+	if v := os.Getenv("GLITCHTIP_URL"); v != "" {
+		*glitchtipURL = v
+	}
+	if v := os.Getenv("GLITCHTIP_TOKEN"); v != "" {
+		*glitchtipToken = v
+	}
+	if v := os.Getenv("METRICS_LISTEN"); v != "" {
+		*metricsListen = v
+	}
+
+	metricsMux := http.NewServeMux()
+	metricsMux.Handle("/metrics", promhttp.Handler())
+	metricsSrv := &http.Server{Addr: *metricsListen, Handler: metricsMux}
+	go func() {
+		log.Printf("metrics server listening on %s", *metricsListen)
+		if err := metricsSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Printf("metrics server error: %v", err)
+		}
+	}()
 
 	lis, err := openListener(*listen)
 	if err != nil {
@@ -247,7 +284,7 @@ func main() {
 		if vp == nil {
 			log.Fatal("vertex: VERTEX_ALLOWED_MODELS must be set when vertex-project is configured")
 		}
-		handler := executor.NewVertexProxy(*vertexProject, *vertexRegion, ts, vp)
+		handler := executor.InstrumentHTTPHandler("vertex", executor.NewVertexProxy(*vertexProject, *vertexRegion, ts, vp))
 		vertexSrv = &http.Server{Addr: *vertexListen, Handler: handler}
 		go func() {
 			log.Printf("vertex-auth-proxy listening on %s (project=%s region=%s)", *vertexListen, *vertexProject, *vertexRegion)
@@ -262,7 +299,7 @@ func main() {
 		if err := executor.ValidateJiraConfig(*jiraURL, *jiraUsername, *jiraToken); err != nil {
 			log.Fatalf("jira config: %v", err)
 		}
-		handler := executor.NewJiraProxy(*jiraURL, *jiraUsername, *jiraToken)
+		handler := executor.InstrumentHTTPHandler("jira", executor.NewJiraProxy(*jiraURL, *jiraUsername, *jiraToken))
 		jiraSrv = &http.Server{Addr: *jiraListen, Handler: handler}
 		go func() {
 			log.Printf("jira-auth-proxy listening on %s (upstream=%s)", *jiraListen, *jiraURL)
@@ -274,12 +311,27 @@ func main() {
 
 	var screenshotSrv *http.Server
 	if ghToken := os.Getenv("GH_TOKEN"); ghToken != "" {
-		handler := executor.NewScreenshotUploader(ghToken)
+		handler := executor.InstrumentHTTPHandler("screenshot", executor.NewScreenshotUploader(ghToken))
 		screenshotSrv = &http.Server{Addr: *screenshotListen, Handler: handler}
 		go func() {
 			log.Printf("screenshot-upload listening on %s", *screenshotListen)
 			if err := screenshotSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 				log.Fatalf("screenshot upload: %v", err)
+			}
+		}()
+	}
+
+	var glitchtipSrv *http.Server
+	if *glitchtipURL != "" {
+		if err := executor.ValidateGlitchTipConfig(*glitchtipURL, *glitchtipToken); err != nil {
+			log.Fatalf("glitchtip config: %v", err)
+		}
+		handler := executor.InstrumentHTTPHandler("glitchtip", executor.NewGlitchTipProxy(*glitchtipURL, *glitchtipToken))
+		glitchtipSrv = &http.Server{Addr: *glitchtipListen, Handler: handler}
+		go func() {
+			log.Printf("glitchtip-auth-proxy listening on %s (upstream=%s)", *glitchtipListen, *glitchtipURL)
+			if err := glitchtipSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				log.Fatalf("glitchtip proxy: %v", err)
 			}
 		}()
 	}
@@ -300,6 +352,12 @@ func main() {
 		}
 		if screenshotSrv != nil {
 			screenshotSrv.Shutdown(ctx)
+		}
+		if glitchtipSrv != nil {
+			glitchtipSrv.Shutdown(ctx)
+		}
+		if err := metricsSrv.Shutdown(ctx); err != nil {
+			log.Printf("metrics server shutdown error: %v", err)
 		}
 	}()
 

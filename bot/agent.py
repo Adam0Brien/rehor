@@ -1,5 +1,6 @@
 """Core agent cycle — invokes Claude Agent SDK."""
 
+import asyncio
 import json
 import logging
 import os
@@ -18,13 +19,19 @@ from claude_agent_sdk import (
 )
 
 from .config import Config
+from .constants import MEMORY_API_BASE
+from .metrics import MCP_SERVER_STATUS_TOTAL, TURN_BUDGET_EVENT_TOTAL, WORK_TYPE_TOTAL
 
 logger = logging.getLogger(__name__)
 
 TURN_WARNING_THRESHOLD = 0.75  # warn at 75% of max_turns
 TURN_CRITICAL_THRESHOLD = 0.90  # urgent at 90%
 
-DASHBOARD_URL = os.environ.get("BOT_DASHBOARD_URL", "http://localhost:8080/api/bot-status")
+DASHBOARD_URL = os.environ.get("BOT_DASHBOARD_URL", f"{MEMORY_API_BASE}/bot-status")
+
+# Track consecutive status push failures for warning after N misses
+_status_fail_count = 0
+_STATUS_FAIL_WARNING_THRESHOLD = 5
 
 
 @dataclass
@@ -44,21 +51,50 @@ async def _push_status(
     message: str,
     jira_key: str | None = None,
     repo: str | None = None,
+    instance_id: str | None = None,
 ) -> None:
     """Push a status update to the dashboard banner via HTTP."""
+    global _status_fail_count
     try:
+        payload: dict = {
+            "state": state,
+            "message": message,
+            "external_key": jira_key,
+            "repo": repo,
+        }
+        if instance_id:
+            payload["instance_id"] = instance_id
         await client.post(
             DASHBOARD_URL,
-            json={
-                "state": state,
-                "message": message,
-                "jira_key": jira_key,
-                "repo": repo,
-            },
+            json=payload,
             timeout=2.0,
         )
-    except Exception:
-        pass  # Dashboard may be down — don't break the bot
+        _status_fail_count = 0
+    except Exception as e:
+        _status_fail_count += 1
+        logger.debug("Dashboard push failed: %s", e)
+        if _status_fail_count == _STATUS_FAIL_WARNING_THRESHOLD:
+            logger.warning(
+                "Dashboard unreachable (%d consecutive failures, silencing)",
+                _STATUS_FAIL_WARNING_THRESHOLD,
+            )
+
+
+def push_status(
+    state: str,
+    message: str,
+    *,
+    instance_id: str | None = None,
+    jira_key: str | None = None,
+    repo: str | None = None,
+) -> None:
+    """Synchronous status push for the runner loop (preflight skip/error)."""
+
+    async def _run() -> None:
+        async with httpx.AsyncClient() as http:
+            await _push_status(http, state, message, jira_key=jira_key, repo=repo, instance_id=instance_id)
+
+    asyncio.run(_run())
 
 
 def _describe_tool_use(block) -> str:
@@ -99,7 +135,7 @@ def _describe_tool_use(block) -> str:
         return name
 
 
-def _make_turn_budget_hook(max_turns: int):
+def _make_turn_budget_hook(max_turns: int, label: str):
     """Create a PostToolUse hook that injects turn budget warnings."""
     turn_count = {"n": 0, "warned": False, "critical": False}
     warn_at = int(max_turns * TURN_WARNING_THRESHOLD)
@@ -113,6 +149,7 @@ def _make_turn_budget_hook(max_turns: int):
             turn_count["critical"] = True
             remaining = max_turns - n
             logger.warning("Turn budget critical: %d/%d used", n, max_turns)
+            TURN_BUDGET_EVENT_TOTAL.labels(label, "critical").inc()
             return {
                 "systemMessage": (
                     f"TURN BUDGET CRITICAL: ~{n}/{max_turns} tool calls used, "
@@ -126,6 +163,7 @@ def _make_turn_budget_hook(max_turns: int):
             turn_count["warned"] = True
             remaining = max_turns - n
             logger.info("Turn budget warning: %d/%d used", n, max_turns)
+            TURN_BUDGET_EVENT_TOTAL.labels(label, "warning").inc()
             return {
                 "systemMessage": (
                     f"TURN BUDGET WARNING: ~{n}/{max_turns} tool calls used, "
@@ -150,7 +188,7 @@ async def run_cycle(
     preflight_prompt: str | None = None,
 ) -> tuple[ResultMessage | None, CycleContext]:
     """Run a single bot cycle via the Claude Agent SDK."""
-    turn_hook = _make_turn_budget_hook(config.max_turns)
+    turn_hook = _make_turn_budget_hook(config.max_turns, label)
     options = ClaudeAgentOptions(
         model=config.model,
         max_turns=config.max_turns,
@@ -202,7 +240,7 @@ async def run_cycle(
 
     async with httpx.AsyncClient() as http:
         # Signal cycle start to dashboard
-        await _push_status(http, "working", "Starting cycle...")
+        await _push_status(http, "working", "Starting cycle...", instance_id=instance_id)
 
         try:
             async for message in query(prompt=prompt, options=options):
@@ -212,6 +250,7 @@ async def run_cycle(
                     for srv in mcp_status:
                         status = srv.get("status", "unknown")
                         name = srv.get("name", "?")
+                        MCP_SERVER_STATUS_TOTAL.labels(name, status).inc()
                         if status != "connected":
                             logger.warning("MCP %s: %s", name, status)
                         else:
@@ -227,7 +266,7 @@ async def run_cycle(
                                 # Log full text (truncated)
                                 logger.info("[agent] %s", text[:300])
                                 # Push to dashboard
-                                await _push_status(http, "working", text[:500])
+                                await _push_status(http, "working", text[:500], instance_id=instance_id)
                         elif isinstance(block, ToolResultBlock):
                             _extract_task_id_from_result(block, ctx)
                         elif hasattr(block, "name"):
@@ -248,18 +287,18 @@ async def run_cycle(
 
         except Exception:
             logger.exception("Agent cycle failed")
-            await _push_status(http, "error", "Cycle failed — check bot.log")
+            await _push_status(http, "error", "Cycle failed — check bot.log", instance_id=instance_id)
 
         # Determine work type from context
         result_text = getattr(result, "result", "") or ""
         if "NO_WORK_FOUND" in result_text:
             ctx.work_type = ctx.work_type or "idle"
-            await _push_status(http, "idle", "No work found. Sleeping...")
+            await _push_status(http, "idle", "No work found. Sleeping...", instance_id=instance_id)
         elif getattr(result, "subtype", "") != "success":
             ctx.work_type = ctx.work_type or "error"
-            await _push_status(http, "idle", "Cycle complete. Sleeping...")
+            await _push_status(http, "idle", "Cycle complete. Sleeping...", instance_id=instance_id)
         else:
-            await _push_status(http, "idle", "Cycle complete. Sleeping...")
+            await _push_status(http, "idle", "Cycle complete. Sleeping...", instance_id=instance_id)
 
         # Extract a short summary from the result text
         if not ctx.summary and result_text:
@@ -268,6 +307,7 @@ async def run_cycle(
             if lines:
                 ctx.summary = lines[-1][:200]
 
+    WORK_TYPE_TOTAL.labels(label, ctx.work_type or "triage_only").inc()
     return result, ctx
 
 
@@ -348,8 +388,8 @@ def _extract_task_id_from_result(block: ToolResultBlock, ctx: CycleContext) -> N
         data = json.loads(text)
         if not isinstance(data, dict):
             return
-        # Task objects: {id: int, jira_key: ...}
-        if isinstance(data.get("id"), int) and "jira_key" in data:
+        # Task objects: {id: int, external_key: ...}
+        if isinstance(data.get("id"), int) and ("external_key" in data or "jira_key" in data):
             ctx.task_id = data["id"]
         # Cycle run objects from progress_store: {task_id: int, cycle_type: ...}
         elif isinstance(data.get("task_id"), int) and data["task_id"] > 0:

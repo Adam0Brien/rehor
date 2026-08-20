@@ -3,6 +3,7 @@
 
 import argparse
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -12,13 +13,13 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from urllib.error import URLError
-from urllib.request import urlopen
 
 from dotenv import load_dotenv
 from filelock import FileLock, Timeout
+from prometheus_client import start_http_server
 
-from .agent import run_cycle
+from . import idle_reminder
+from .agent import push_status, run_cycle
 from .config import (
     ALLOWED_TOOLS,
     Config,
@@ -26,12 +27,23 @@ from .config import (
     load_config,
     load_instance_config,
     load_mcp_servers,
+    resolve_active_envs,
+    resolve_workflow_dir,
     sanitize_env,
     validate_instance_config,
     validate_manifest,
 )
 from .costs import record_cost
-from .merge import apply_merged_config
+from .merge import apply_merged_config, install_skills
+from .metrics import (
+    CONFIG_SYNC_TOTAL,
+    CYCLE_DURATION_SECONDS,
+    CYCLE_TIMEOUT_TOTAL,
+    DISK_FREE_MB,
+    PREFLIGHT_CONSECUTIVE_ERRORS,
+    PREFLIGHT_OUTCOME_TOTAL,
+    WORK_TYPE_TOTAL,
+)
 from .preflight import run_preflight
 from .transcripts import post_orphan_cycle, record_transcript
 
@@ -101,8 +113,12 @@ def setup_git(script_dir: Path) -> None:
 
 
 def setup_logging() -> None:
-    """Configure logging to stdout and data/bot.log."""
+    """Configure logging to stdout and data/bot.log.
+
+    Set DEBUG=true env var to enable DEBUG-level logging.
+    """
     DATA_DIR.mkdir(exist_ok=True)
+    level = logging.DEBUG if os.environ.get("DEBUG") == "true" else logging.INFO
     fmt = "[%(asctime)s] %(message)s"
     datefmt = "%Y-%m-%d %H:%M:%S"
 
@@ -112,7 +128,7 @@ def setup_logging() -> None:
     ]
 
     logging.basicConfig(
-        level=logging.INFO,
+        level=level,
         format=fmt,
         datefmt=datefmt,
         handlers=handlers,
@@ -122,12 +138,16 @@ def setup_logging() -> None:
 REMOTE_CONFIG_DIR = DATA_DIR / "remote-config"
 
 
-def sync_config_repo() -> Path | None:
-    """Clone or pull BOT_CONFIG_REPO. Returns agent config dir or None."""
+def sync_config_repo(label: str) -> tuple[Path | None, Path | None]:
+    """Clone or pull BOT_CONFIG_REPO.
+
+    Returns (profile_agent_dir, shared_agent_dir).
+    shared_agent_dir is the sibling ``shared/agent/`` directory if it exists.
+    """
     logger = logging.getLogger(__name__)
     repo_url = os.environ.get("BOT_CONFIG_REPO")
     if not repo_url:
-        return None
+        return None, None
 
     config_dir = REMOTE_CONFIG_DIR
     try:
@@ -144,6 +164,7 @@ def sync_config_repo() -> Path | None:
                     r.returncode,
                     r.stderr.decode().strip(),
                 )
+                CONFIG_SYNC_TOTAL.labels(label, "pull_failed").inc()
         else:
             config_dir.parent.mkdir(parents=True, exist_ok=True)
             r = subprocess.run(
@@ -158,41 +179,43 @@ def sync_config_repo() -> Path | None:
                     r.returncode,
                     r.stderr.decode().strip(),
                 )
-                return None
+                CONFIG_SYNC_TOTAL.labels(label, "clone_failed").inc()
+                return None, None
     except subprocess.TimeoutExpired:
         logger.warning("Config repo sync timed out — using built-in config")
-        return None
+        CONFIG_SYNC_TOTAL.labels(label, "timeout").inc()
+        return None, None
     except Exception as exc:
         logger.warning("Config repo sync failed: %s — using built-in config", exc)
-        return None
+        CONFIG_SYNC_TOTAL.labels(label, "error").inc()
+        return None, None
 
     sub = os.environ.get("BOT_CONFIG_PATH", "rehor-config")
-    agent_dir = config_dir / sub / "agent"
+    profile_dir = config_dir / sub
+    agent_dir = profile_dir / "agent"
     if not agent_dir.is_dir():
         logger.warning("Config repo has no %s/agent/ dir — using built-in config", sub)
-        return None
+        CONFIG_SYNC_TOTAL.labels(label, "no_agent_dir").inc()
+        return None, None
 
-    return agent_dir
+    shared_agent_dir = None
+    shared_dir = profile_dir.parent / "shared" / "agent"
+    if shared_dir.is_dir():
+        shared_agent_dir = shared_dir
+        logger.info("Multi-profile: shared config at %s", shared_dir)
+
+    CONFIG_SYNC_TOTAL.labels(label, "ok").inc()
+    return agent_dir, shared_agent_dir
 
 
 SLEEP_SIGNAL_FILE = DATA_DIR / "cycle-sleep.json"
 LOW_DISK_THRESHOLD_MB = 512
-WAKE_POLL_INTERVAL = 5
-
-DASHBOARD_BASE_URL = os.environ.get("BOT_DASHBOARD_URL", "http://localhost:8080/api/bot-status").rsplit(
-    "/bot-status", 1
-)[0]
 
 
-def _check_wake_signal(instance_id: str) -> bool:
-    """Poll the memory server for a wake trigger. Returns True if wake requested."""
-    try:
-        url = f"{DASHBOARD_BASE_URL}/instances/{instance_id}/wake"
-        with urlopen(url, timeout=2) as resp:
-            data = json.loads(resp.read())
-            return data.get("wake", False)
-    except (URLError, OSError, json.JSONDecodeError, Exception):
-        return False
+def _try_slack_digest() -> None:
+    from .slack_digest import try_slack_digest
+
+    try_slack_digest()
 
 
 def _write_sleep_signal(seconds: int, reason: str) -> None:
@@ -201,14 +224,11 @@ def _write_sleep_signal(seconds: int, reason: str) -> None:
     SLEEP_SIGNAL_FILE.write_text(json.dumps({"recommended_sleep": seconds, "reason": reason}))
 
 
-def _read_sleep_signal(config: Config, instance_id: str | None = None) -> int:
+def _read_sleep_signal(config: Config) -> int:
     """Read sleep duration from skill-written signal file.
 
     Skills write data/cycle-sleep.json with {"recommended_sleep": N, "reason": "..."}.
     No file = standard interval (work was done). File is always deleted after reading.
-
-    Instead of blocking for the full duration, sleeps in short intervals and polls
-    the memory server for a wake trigger so the dashboard can interrupt the sleep.
     """
     logger = logging.getLogger(__name__)
     sleep_seconds = config.interval
@@ -226,23 +246,8 @@ def _read_sleep_signal(config: Config, instance_id: str | None = None) -> int:
     else:
         logger.info("No sleep signal, using default %ds", config.interval)
 
-    sleep_seconds = max(sleep_seconds, WAKE_POLL_INTERVAL)
     logger.info("Sleeping for %ds...", sleep_seconds)
-
-    if instance_id:
-        elapsed = 0
-        while elapsed < sleep_seconds:
-            time.sleep(WAKE_POLL_INTERVAL)
-            elapsed += WAKE_POLL_INTERVAL
-            if _check_wake_signal(instance_id):
-                logger.info(
-                    "Wake signal received after %ds — starting next cycle early",
-                    elapsed,
-                )
-                return elapsed
-    else:
-        time.sleep(sleep_seconds)
-
+    time.sleep(sleep_seconds)
     return sleep_seconds
 
 
@@ -250,13 +255,16 @@ def assemble_claude_md(
     script_dir: Path,
     instance_config: InstanceConfig | None = None,
     remote_agent_dir: Path | None = None,
+    shared_agent_dir: Path | None = None,
 ) -> None:
-    """Concatenate core + workflow preset CLAUDE.md into project root.
+    """Concatenate core + shared + workflow preset CLAUDE.md into project root.
+
+    Layer order: core → shared → workflow → instance.
 
     Supports instance CLAUDE.md via claude_md_strategy:
-      replace — core + instance CLAUDE.md (skip workflow)
-      append  — core + workflow + instance CLAUDE.md
-      ignore  — core + workflow only (default)
+      replace — core + shared + instance CLAUDE.md (skip workflow)
+      append  — core + shared + workflow + instance CLAUDE.md
+      ignore  — core + shared + workflow only (default)
     """
     logger = logging.getLogger(__name__)
     presets = script_dir / "presets"
@@ -271,6 +279,11 @@ def assemble_claude_md(
 
     parts = [core.read_text()]
 
+    shared_md = shared_agent_dir / "CLAUDE.md" if shared_agent_dir else None
+    if shared_md is not None and shared_md.is_file():
+        parts.append(shared_md.read_text())
+        logger.info("CLAUDE.md: included shared layer from %s", shared_md)
+
     instance_md = remote_agent_dir / "CLAUDE.md" if remote_agent_dir else None
     has_instance_md = instance_md is not None and instance_md.is_file()
 
@@ -278,7 +291,7 @@ def assemble_claude_md(
         parts.append(instance_md.read_text())
         logger.info("CLAUDE.md strategy=replace — using instance CLAUDE.md instead of workflow")
     else:
-        wf_path = presets / "workflows" / workflow / "CLAUDE.md"
+        wf_path = resolve_workflow_dir(script_dir, workflow, remote_agent_dir) / "CLAUDE.md"
         if wf_path.is_file():
             parts.append(wf_path.read_text())
         else:
@@ -303,6 +316,7 @@ def cleanup_between_cycles(script_dir: Path) -> None:
         free_mb = usage.free // (1024 * 1024)
     except OSError:
         return
+    DISK_FREE_MB.set(free_mb)
 
     if free_mb >= LOW_DISK_THRESHOLD_MB:
         logger.info("Disk OK: %dM free (threshold %dM)", free_mb, LOW_DISK_THRESHOLD_MB)
@@ -329,22 +343,33 @@ def cleanup_between_cycles(script_dir: Path) -> None:
     if repos_dir.exists():
         for repo in repos_dir.iterdir():
             if (repo / ".git").is_dir():
-                try:
+                with contextlib.suppress(subprocess.TimeoutExpired, FileNotFoundError):
                     subprocess.run(
                         ["git", "gc", "--auto", "--quiet"],
                         cwd=str(repo),
                         capture_output=True,
                         timeout=60,
                     )
-                except (subprocess.TimeoutExpired, FileNotFoundError):
-                    pass
 
     try:
         usage = shutil.disk_usage(str(script_dir))
         free_mb = usage.free // (1024 * 1024)
+        DISK_FREE_MB.set(free_mb)
         logger.info("Cleanup done. Free space: %dM", free_mb)
     except OSError:
         pass
+
+
+def handle_cycle_timeout(timeout_seconds: int, label: str) -> tuple[None, None]:
+    """Log timeout and warn about lost cost data. Returns (None, None) for result, ctx."""
+    logger = logging.getLogger(__name__)
+    logger.error(
+        "Cycle timed out after %ds — skipping to next cycle",
+        timeout_seconds,
+    )
+    logger.warning("Cost data for timed-out cycle lost (SDK does not expose partial usage)")
+    CYCLE_TIMEOUT_TOTAL.labels(label).inc()
+    return None, None
 
 
 def main() -> None:
@@ -378,13 +403,20 @@ def main() -> None:
 
     # Initial config sync + instance config load (before validation so
     # instance.yaml can override the workflow preset)
-    initial_agent_dir = sync_config_repo()
+    initial_agent_dir, initial_shared_dir = sync_config_repo(args.label)
+    if initial_shared_dir:
+        apply_merged_config(SCRIPT_DIR, initial_shared_dir)
     if initial_agent_dir:
         apply_merged_config(SCRIPT_DIR, initial_agent_dir)
     instance_config = load_instance_config(initial_agent_dir)
+    install_skills(
+        SCRIPT_DIR,
+        resolve_workflow_dir(SCRIPT_DIR, instance_config.workflow, initial_agent_dir),
+        resolve_active_envs(SCRIPT_DIR, instance_config),
+    )
 
-    validate_manifest(SCRIPT_DIR, instance_config.workflow, mcp_servers)
-    validate_instance_config(SCRIPT_DIR, instance_config)
+    validate_manifest(SCRIPT_DIR, instance_config.workflow, mcp_servers, initial_agent_dir)
+    validate_instance_config(SCRIPT_DIR, instance_config, initial_agent_dir)
 
     # Remove secrets from env so Bash subprocesses can't leak them.
     # MCP servers already have resolved values. gh/glab use config files.
@@ -407,6 +439,9 @@ def main() -> None:
     signal.signal(signal.SIGINT, shutdown)
     signal.signal(signal.SIGTERM, shutdown)
 
+    start_http_server(9091)
+    logger.info("Metrics server listening on :9091")
+
     instance_id = args.instance_id or None
     logger.info(
         "Dev bot started. Label: %s. Instance: %s. Provider: Vertex AI. Active interval: %ds. Idle interval: %ds.",
@@ -420,12 +455,21 @@ def main() -> None:
 
     try:
         while True:
-            remote_agent_dir = sync_config_repo()
+            _try_slack_digest()
+
+            remote_agent_dir, shared_agent_dir = sync_config_repo(args.label)
+            if shared_agent_dir:
+                apply_merged_config(SCRIPT_DIR, shared_agent_dir)
             if remote_agent_dir:
                 apply_merged_config(SCRIPT_DIR, remote_agent_dir)
 
             instance_config = load_instance_config(remote_agent_dir)
-            assemble_claude_md(SCRIPT_DIR, instance_config, remote_agent_dir)
+            install_skills(
+                SCRIPT_DIR,
+                resolve_workflow_dir(SCRIPT_DIR, instance_config.workflow, remote_agent_dir),
+                resolve_active_envs(SCRIPT_DIR, instance_config),
+            )
+            assemble_claude_md(SCRIPT_DIR, instance_config, remote_agent_dir, shared_agent_dir)
 
             # --- Pre-flight: gather data before starting AI session ---
             preflight_result = run_preflight(SCRIPT_DIR, instance_config.workflow, remote_agent_dir, instance_id)
@@ -435,29 +479,56 @@ def main() -> None:
                 if preflight_result.action == "error":
                     consecutive_preflight_errors += 1
                     logger.error("Preflight error (consecutive: %d)", consecutive_preflight_errors)
-                    post_orphan_cycle(instance_id or args.label, "error", preflight_result.transcript)
+                    PREFLIGHT_OUTCOME_TOTAL.labels(args.label, "error").inc()
+                    PREFLIGHT_CONSECUTIVE_ERRORS.labels(args.label).set(consecutive_preflight_errors)
+                    WORK_TYPE_TOTAL.labels(args.label, "error").inc()
+                    post_orphan_cycle(
+                        instance_id or args.label,
+                        "error",
+                        preflight_result.transcript,
+                        input_prompt=preflight_result.transcript,
+                    )
+                    push_status("error", "Preflight failed — check bot.log", instance_id=instance_id)
                     error_sleep = min(config.interval * (2**consecutive_preflight_errors), 300)
                     _write_sleep_signal(error_sleep, "preflight_error")
-                    _read_sleep_signal(config, instance_id)
+                    _read_sleep_signal(config)
                     cleanup_between_cycles(SCRIPT_DIR)
                     continue
 
                 if preflight_result.action == "skip":
                     consecutive_preflight_errors = 0
                     logger.info("Preflight skip — no session needed")
-                    post_orphan_cycle(instance_id or args.label, "idle", preflight_result.transcript)
-                    _write_sleep_signal(300, "preflight_skip")
-                    _read_sleep_signal(config, instance_id)
+                    PREFLIGHT_OUTCOME_TOTAL.labels(args.label, "skip").inc()
+                    PREFLIGHT_CONSECUTIVE_ERRORS.labels(args.label).set(0)
+                    WORK_TYPE_TOTAL.labels(args.label, "idle").inc()
+                    post_orphan_cycle(
+                        instance_id or args.label,
+                        "idle",
+                        preflight_result.transcript,
+                        input_prompt=preflight_result.transcript,
+                    )
+                    push_status("idle", "No work found. Sleeping...", instance_id=instance_id)
+                    idle_reminder.on_preflight_skip(
+                        instance_id or args.label,
+                        idle_cycle_limit=instance_config.idle_cycle_limit,
+                        cooldown_seconds=config.idle_reminder_cooldown_seconds,
+                    )
+                    _write_sleep_signal(config.idle_interval, "preflight_skip")
+                    _read_sleep_signal(config)
                     cleanup_between_cycles(SCRIPT_DIR)
                     continue
 
                 # action == "start"
                 consecutive_preflight_errors = 0
+                PREFLIGHT_OUTCOME_TOTAL.labels(args.label, "start").inc()
+                PREFLIGHT_CONSECUTIVE_ERRORS.labels(args.label).set(0)
+                idle_reminder.on_preflight_start(instance_id or args.label)
                 preflight_prompt = preflight_result.prompt
                 logger.info("Preflight start — launching session with pre-fetched data")
 
             logger.info("Running agent cycle...")
 
+            cycle_start = time.monotonic()
             try:
                 result, ctx = asyncio.run(
                     asyncio.wait_for(
@@ -473,12 +544,11 @@ def main() -> None:
                         timeout=config.cycle_timeout,
                     )
                 )
-            except asyncio.TimeoutError:
-                logger.error(
-                    "Cycle timed out after %ds — skipping to next cycle",
-                    config.cycle_timeout,
-                )
-                result, ctx = None, None
+            except TimeoutError:
+                result, ctx = handle_cycle_timeout(config.cycle_timeout, args.label)
+            cycle_duration = time.monotonic() - cycle_start
+            work_type = (ctx.work_type if ctx else None) or "unknown"
+            CYCLE_DURATION_SECONDS.labels(args.label, work_type).observe(cycle_duration)
 
             if result is not None:
                 record_cost(
@@ -486,6 +556,8 @@ def main() -> None:
                     label=args.label,
                     result=result,
                     ctx=ctx,
+                    instance_id=instance_id,
+                    workflow=instance_config.workflow,
                 )
                 record_transcript(
                     label=args.label,
@@ -493,11 +565,12 @@ def main() -> None:
                     ctx=ctx,
                     cwd=str(SCRIPT_DIR),
                     instance_id=instance_id,
+                    input_prompt=preflight_prompt,
                 )
             else:
                 logger.warning("Cycle produced no result")
 
-            _read_sleep_signal(config, instance_id)
+            _read_sleep_signal(config)
 
             cleanup_between_cycles(SCRIPT_DIR)
     finally:

@@ -27,8 +27,8 @@ The memory server dashboard at `http://localhost:8080` shows:
 
 ```bash
 make logs           # Tail bot.log
-docker compose logs -f bot          # Docker container logs
-docker compose logs -f memory-server  # Memory server logs
+podman compose logs -f bot          # Container logs
+podman compose logs -f memory-server  # Memory server logs
 ```
 
 ## Ticket Lifecycle
@@ -273,18 +273,6 @@ make run LABEL=hcc-ai-framework
 make run-rbac
 ```
 
-### In Docker
-
-```bash
-# Start with default label
-make docker-up
-
-# Start with a different label
-BOT_LABEL=hcc-ai-platform-accessmanagement make docker-up
-```
-
-For multiple labels in Docker simultaneously, you'd run separate compose projects or add multiple bot services to `docker-compose.yml`.
-
 ## Cost Management
 
 Each cycle records its cost. Monitor spending:
@@ -318,5 +306,9 @@ Check the bot logs for which server failed:
 
 Check the task record in the dashboard. Look at `metadata.last_step` and `metadata.notes`. If truly stuck:
 1. Comment on the Jira ticket explaining the blocker
-2. Manually set the task status to `paused` via the dashboard
+2. Open the task in the dashboard and click **Pause Task** (optionally enter a reason)
 3. The bot will skip it and move to other work
+
+When the blocker is resolved, open the paused task and click **Unpause Task**. No SQL or cluster access needed. Unpausing restores `in_progress`, or `pr_open` if the task already has a PR/MR artifact.
+
+Pause/unpause only change memory-server task status — they do not transition Jira.

@@ -48,6 +48,7 @@ PR statuses provided in input. For each `pr_open`/`pr_changes` task:
 4. Handle in order:
 
 **Failing CI**: `gh pr checks <n>` / `glab api "projects/<path>/merge_requests/<n>/pipelines" --hostname gitlab.cee.redhat.com`. Checkout branch → fix → commit → push. Jira comment. `task_update` `last_addressed`.
+- **Konflux pipelines** (experimental, not all namespaces supported): `konflux_details:` URL in preflight → call `konflux_get_build_logs(details_url=...)`. No URL but check name has "on-pull-request"/"on-push" → get `detailsUrl` from `gh pr checks`, pass to same tool. If 401/403 → skip, log the error, fix CI without logs.
 
 **Merge conflicts**: Rebase on default branch → resolve → force push. Jira comment. `task_update` `last_addressed`.
 

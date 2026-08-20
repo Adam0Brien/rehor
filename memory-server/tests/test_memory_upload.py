@@ -1,15 +1,14 @@
 """Tests for the POST /api/memories/upload endpoint."""
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from bot_memory_server.api import api_memory_upload
 from httpx import ASGITransport, AsyncClient
 from starlette.applications import Starlette
 from starlette.routing import Route
-
-from bot_memory_server.api import api_memory_upload
 
 app = Starlette(routes=[Route("/api/memories/upload", api_memory_upload, methods=["POST"])])
 
@@ -25,7 +24,7 @@ def _fake_row(id: int, title: str, category: str, **kwargs):
         "external_key": kwargs.get("external_key"),
         "source_type": kwargs.get("source_type"),
         "tags": kwargs.get("tags", []),
-        "created_at": datetime.now(timezone.utc),
+        "created_at": datetime.now(UTC),
         "metadata": json.dumps(kwargs.get("metadata", {})),
         "embedding": [0.0] * 384,
     }

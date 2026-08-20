@@ -18,6 +18,25 @@ import type { CycleEntry, DailyAggregate, AnalyticsData } from '../types';
 import { fetchCosts, fetchAnalytics } from '../api';
 import { formatDuration, formatTokens, sourceUrl, displayKey } from '../utils';
 import { useWS } from '../hooks/useWebSocket';
+import {
+  Alert,
+  AlertActionCloseButton,
+  Card,
+  CardBody,
+  CardTitle,
+  CardHeader,
+  Flex,
+  FlexItem,
+  Label,
+  ToggleGroup,
+  ToggleGroupItem,
+  MenuToggle,
+  MenuToggleElement,
+  Select,
+  SelectList,
+  SelectOption,
+  Content
+} from '@patternfly/react-core';
 
 const DAYS_OPTIONS = [7, 14, 30, 90];
 
@@ -49,8 +68,12 @@ const WORK_TYPE_COLORS: Record<string, string> = {
 
 const WORK_TYPE_LABELS: Record<string, string> = {
   new_ticket: 'New Ticket',
+  implement: 'Implement',
   pr_review: 'PR Review',
+  review: 'Review',
   ci_fix: 'CI Fix',
+  'ci-fix': 'CI Fix',
+  triage: 'Triage',
   investigation: 'Investigation',
   cve: 'CVE',
   memory_housekeeping: 'Housekeeping',
@@ -164,15 +187,17 @@ function CycleRow({ c }: { c: CycleEntry }) {
 
 function SummaryCard({ value, label, sub, color }: { value: string; label: string; sub?: string; color?: string }) {
   return (
-    <div className="summary-card" style={color ? { borderColor: color } : undefined}>
-      <div className="summary-value" style={color ? { color } : undefined}>{value}</div>
-      <div className="summary-label">{label}</div>
-      {sub && <span className="summary-sub">{sub}</span>}
-    </div>
+    <Card isCompact isGlass style={color ? { borderLeft: `3px solid ${color}` } : undefined}>
+      <CardBody>
+        <Content component="p" style={{ fontSize: '1.5rem', fontWeight: 700, margin: 0, color: color || 'inherit' }}>{value}</Content>
+        <Content component="p" style={{ margin: '4px 0 0', fontWeight: 500 }}>{label}</Content>
+        {sub && <Content component="small" style={{ margin: 0, color: 'var(--pf-t--global--text--color--subtle, var(--text-dim))' }}>{sub}</Content>}
+      </CardBody>
+    </Card>
   );
 }
 
-export default function Costs() {
+export default function Costs({ instanceId }: { instanceId?: string }) {
   const [dateMode, setDateMode] = useState<DateMode>('preset');
   const [days, setDays] = useState(30);
   const [dateFrom, setDateFrom] = useState('');
@@ -180,6 +205,8 @@ export default function Costs() {
   const [data, setData] = useState<CostsData | null>(null);
   const [analytics, setAnalytics] = useState<AnalyticsData | null>(null);
   const [metric, setMetric] = useState<CycleMetric>('cost');
+  const [isDaysOpen, setIsDaysOpen] = useState(false);
+  const [bannerDismissed, setBannerDismissed] = useState(false);
 
   const { onEvent } = useWS();
 
@@ -187,12 +214,12 @@ export default function Costs() {
     const from = dateMode === 'range' ? dateFrom || undefined : undefined;
     const to = dateMode === 'range' ? dateTo || undefined : undefined;
     const [costsRes, analyticsRes] = await Promise.all([
-      fetchCosts(days, 500, from, to),
-      fetchAnalytics(days, from, to),
+      fetchCosts(days, 500, from, to, instanceId),
+      fetchAnalytics(days, from, to, instanceId),
     ]);
-    setData({ cycles: costsRes.items || [], daily: costsRes.daily || [] });
+    setData({ cycles: costsRes?.items || [], daily: costsRes?.daily || [] });
     setAnalytics(analyticsRes);
-  }, [days, dateMode, dateFrom, dateTo]);
+  }, [days, dateMode, dateFrom, dateTo, instanceId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -205,7 +232,25 @@ export default function Costs() {
   if (!data || !analytics) return <div className="empty-state">Loading...</div>;
 
   const { cycles, daily } = data;
-  const { summary, work_types, repos, tickets, feedback } = analytics;
+  const {
+    summary = {
+      total_cycles: 0,
+      work_cycles: 0,
+      idle_cycles: 0,
+      error_cycles: 0,
+      unique_tickets: 0,
+      total_cost: 0,
+      avg_cost_per_work_cycle: 0,
+      avg_turns: 0,
+      avg_duration_ms: 0,
+      repos_touched: 0,
+      tickets_resolved: 0,
+    },
+    work_types = [],
+    repos = [],
+    tickets = [],
+    feedback = { avg_review_rounds: 0, zero_review: 0, multi_review: 0 },
+  } = analytics;
 
   const totalDuration = cycles.reduce((s, c) => s + c.duration_ms, 0);
   const totalOutput = cycles.reduce((s, c) => s + c.output_tokens, 0);
@@ -273,29 +318,61 @@ export default function Costs() {
 
   return (
     <div className="costs-page">
+      {instanceId && !bannerDismissed && (
+        <Alert
+          variant="info"
+          isInline
+          title={`Showing costs for ${instanceId} only`}
+          actionClose={<AlertActionCloseButton onClose={() => setBannerDismissed(true)} />}
+          style={{ marginBottom: '16px' }}
+        >
+          <p>Historical entries recorded before per-instance tracking was enabled are not included.{' '}
+          <a href="#/costs">View all instances</a> for the full aggregated view.</p>
+        </Alert>
+      )}
       {/* Date controls */}
-      <div className="controls">
-        <div className="date-mode-toggle">
-          <button className={`metric-tab ${dateMode === 'preset' ? 'active' : ''}`} onClick={() => setDateMode('preset')}>Preset</button>
-          <button className={`metric-tab ${dateMode === 'range' ? 'active' : ''}`} onClick={() => setDateMode('range')}>Date Range</button>
-        </div>
-        {dateMode === 'preset' ? (
-          <select value={days} onChange={(e) => setDays(Number(e.target.value))}>
-            {DAYS_OPTIONS.map(d => <option key={d} value={d}>{d} days</option>)}
-          </select>
-        ) : (
-          <div className="date-range-picker">
-            <label>
-              <span className="date-label">From</span>
-              <input type="date" value={dateFrom} max={dateTo || todayStr} onChange={e => setDateFrom(e.target.value)} />
-            </label>
-            <label>
-              <span className="date-label">To</span>
-              <input type="date" value={dateTo} min={dateFrom} max={todayStr} onChange={e => setDateTo(e.target.value)} />
-            </label>
-          </div>
-        )}
-      </div>
+      <Flex gap={{ default: 'gapMd' }} alignItems={{ default: 'alignItemsCenter' }} style={{ marginBottom: '16px' }}>
+        <FlexItem>
+          <ToggleGroup aria-label="Date mode">
+            <ToggleGroupItem text="Preset" isSelected={dateMode === 'preset'} onChange={() => setDateMode('preset')} />
+            <ToggleGroupItem text="Date Range" isSelected={dateMode === 'range'} onChange={() => setDateMode('range')} />
+          </ToggleGroup>
+        </FlexItem>
+        <FlexItem>
+          {dateMode === 'preset' ? (
+            <Select
+              isOpen={isDaysOpen}
+              selected={String(days)}
+              onSelect={(_e, val) => { setDays(Number(val)); setIsDaysOpen(false); }}
+              onOpenChange={setIsDaysOpen}
+              toggle={(toggleRef: React.Ref<MenuToggleElement>) => (
+                <MenuToggle ref={toggleRef} onClick={() => setIsDaysOpen(!isDaysOpen)} isExpanded={isDaysOpen}>
+                  {days} days
+                </MenuToggle>
+              )}
+            >
+              <SelectList>
+                {DAYS_OPTIONS.map(d => <SelectOption key={d} value={String(d)}>{d} days</SelectOption>)}
+              </SelectList>
+            </Select>
+          ) : (
+            <Flex gap={{ default: 'gapSm' }} alignItems={{ default: 'alignItemsCenter' }}>
+              <FlexItem>
+                <Label variant="outline">From</Label>
+              </FlexItem>
+              <FlexItem>
+                <input type="date" value={dateFrom} max={dateTo || todayStr} onChange={e => setDateFrom(e.target.value)} className="date-range-picker-input" />
+              </FlexItem>
+              <FlexItem>
+                <Label variant="outline">To</Label>
+              </FlexItem>
+              <FlexItem>
+                <input type="date" value={dateTo} min={dateFrom} max={todayStr} onChange={e => setDateTo(e.target.value)} className="date-range-picker-input" />
+              </FlexItem>
+            </Flex>
+          )}
+        </FlexItem>
+      </Flex>
 
       {/* Summary cards */}
       <div className="summary-grid">
@@ -311,8 +388,9 @@ export default function Costs() {
       <div className="analytics-charts">
         {/* Work type pie */}
         {pieData.length > 0 && (
-          <div className="chart-card">
-            <h3>Work Breakdown</h3>
+          <Card isCompact isGlass>
+            <CardHeader><CardTitle>Work Breakdown</CardTitle></CardHeader>
+            <CardBody>
             <ResponsiveContainer width="100%" height={220}>
               <PieChart>
                 <Pie
@@ -340,13 +418,15 @@ export default function Costs() {
                 </span>
               ))}
             </div>
-          </div>
+            </CardBody>
+          </Card>
         )}
 
         {/* Repo breakdown bar */}
         {repoBarData.length > 0 && (
-          <div className="chart-card">
-            <h3>Repos</h3>
+          <Card isCompact isGlass>
+            <CardHeader><CardTitle>Repos</CardTitle></CardHeader>
+            <CardBody>
             <ResponsiveContainer width="100%" height={220}>
               <BarChart data={repoBarData} layout="vertical" margin={{ left: 10 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(48,54,61,0.5)" horizontal={false} />
@@ -368,14 +448,16 @@ export default function Costs() {
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
-          </div>
+            </CardBody>
+          </Card>
         )}
       </div>
 
       {/* Ticket lifecycle */}
       {ticketBarData.length > 0 && (
-        <div className="chart-card">
-          <h3>Ticket Lifecycle — Cycles per Ticket</h3>
+        <Card isCompact isGlass style={{ marginBottom: '16px' }}>
+          <CardHeader><CardTitle>Ticket Lifecycle — Cycles per Ticket</CardTitle></CardHeader>
+          <CardBody>
           <div style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 8 }}>
             Implementation vs review cycles. Hover for cost & time details.
           </div>
@@ -415,11 +497,13 @@ export default function Costs() {
               <Bar dataKey="review" name="Review" stackId="a" fill={WORK_TYPE_COLORS.pr_review} radius={[0, 4, 4, 0]} />
             </BarChart>
           </ResponsiveContainer>
-        </div>
+          </CardBody>
+        </Card>
       )}
 
       {/* Per-Cycle Chart */}
-      <div className="chart-card">
+      <Card isCompact isGlass style={{ marginBottom: '16px' }}>
+        <CardBody>
         <div className="cycle-header-row">
           <h3>Cycles</h3>
           <div className="cycle-summary-inline">
@@ -436,13 +520,11 @@ export default function Costs() {
           </div>
         </div>
 
-        <div className="metric-tabs">
+        <ToggleGroup aria-label="Metric" style={{ marginBottom: '12px' }}>
           {(Object.keys(METRIC_CONFIG) as CycleMetric[]).map(m => (
-            <button key={m} className={`metric-tab ${m === metric ? 'active' : ''}`} style={m === metric ? { borderColor: METRIC_CONFIG[m].color, color: METRIC_CONFIG[m].color } : {}} onClick={() => setMetric(m)}>
-              {METRIC_CONFIG[m].label}
-            </button>
+            <ToggleGroupItem key={m} text={METRIC_CONFIG[m].label} isSelected={m === metric} onChange={() => setMetric(m)} />
           ))}
-        </div>
+        </ToggleGroup>
 
         {cycleChartData.length > 1 && (
           <>
@@ -485,7 +567,8 @@ export default function Costs() {
           {cycles.length === 0 && <div className="empty-state">No cycles recorded</div>}
           {cycles.map(c => <CycleRow key={c.id} c={c} />)}
         </div>
-      </div>
+        </CardBody>
+      </Card>
 
       {/* Daily Summary */}
       {daily.length > 0 && (
@@ -501,8 +584,9 @@ export default function Costs() {
             </div>
           </div>
           <div className="costs-charts">
-            <div className="chart-card">
-              <h3>Cost per Day</h3>
+            <Card isCompact isGlass>
+              <CardHeader><CardTitle>Cost per Day</CardTitle></CardHeader>
+              <CardBody>
               <ResponsiveContainer width="100%" height={200}>
                 <AreaChart data={dailyCostData}>
                   <defs>
@@ -518,9 +602,11 @@ export default function Costs() {
                   <Area type="monotone" dataKey="cost" name="Cost ($)" stroke="#3fb950" fill="url(#dailyCostGrad)" strokeWidth={2} dot={{ r: 3, fill: '#3fb950' }} />
                 </AreaChart>
               </ResponsiveContainer>
-            </div>
-            <div className="chart-card">
-              <h3>Tokens per Day</h3>
+              </CardBody>
+            </Card>
+            <Card isCompact isGlass>
+              <CardHeader><CardTitle>Tokens per Day</CardTitle></CardHeader>
+              <CardBody>
               <ResponsiveContainer width="100%" height={200}>
                 <AreaChart data={dailyTokenData}>
                   <defs>
@@ -542,7 +628,8 @@ export default function Costs() {
                   <Area type="monotone" dataKey="cache_read" name="Cache Read" stroke="#58a6ff" fill="url(#dailyCacheGrad)" strokeWidth={2} dot={{ r: 3, fill: '#58a6ff' }} />
                 </AreaChart>
               </ResponsiveContainer>
-            </div>
+              </CardBody>
+            </Card>
           </div>
         </>
       )}

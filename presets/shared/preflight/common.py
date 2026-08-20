@@ -103,6 +103,12 @@ def upstream_repo(repo_name):
         return repo_name, host
     repos = load_project_repos()
     entry = repos.get(repo_name, {})
+    if not entry:
+        suffix = f"/{repo_name}"
+        for key, cfg in repos.items():
+            if key.endswith(suffix):
+                entry = cfg
+                break
     up = entry.get("upstream", "")
     if not up:
         return "", entry.get("host", "github")
@@ -175,6 +181,7 @@ def get_task_prs(task):
     repo = task.get("repo", "")
     meta = task.get("metadata") or {}
     prs_info = list(meta.get("prs", []))
+    prs_info.extend(meta.get("mrs", []))
     if not prs_info:
         for a in task.get("artifacts") or []:
             if a.get("type") == "pull_request" and a.get("url"):

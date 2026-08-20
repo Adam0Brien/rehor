@@ -2,7 +2,6 @@
 
 import json
 from datetime import datetime
-from typing import Optional
 
 from fastmcp import FastMCP
 
@@ -36,15 +35,15 @@ def register_cycle_tools(mcp: FastMCP):
     @mcp.tool()
     async def progress_store(
         instance_id: str,
-        task_id: Optional[int] = None,
-        external_key: Optional[str] = None,
-        source_type: Optional[str] = None,
+        task_id: int | None = None,
+        external_key: str | None = None,
+        source_type: str | None = None,
         cycle_type: str = "task_work",
-        progress: Optional[dict] = None,
-        started_at: Optional[str] = None,
-        finished_at: Optional[str] = None,
-        tool_calls: Optional[int] = None,
-        tokens_used: Optional[int] = None,
+        progress: dict | None = None,
+        started_at: str | None = None,
+        finished_at: str | None = None,
+        tool_calls: int | None = None,
+        tokens_used: int | None = None,
     ) -> dict:
         """Store a structured progress summary for the current cycle.
         Called by the bot before a cycle ends to persist what happened.
@@ -53,7 +52,8 @@ def register_cycle_tools(mcp: FastMCP):
         source_type: Source type for external_key lookup (default 'jira').
         instance_id: Bot instance name.
         cycle_type: One of 'task_work', 'triage_only', 'idle', 'error'.
-        progress: Structured JSON with keys like last_step, next_step, files_changed, commits, key_decisions, blockers, notes.
+        progress: Structured JSON with keys like last_step, next_step, files_changed,
+            commits, key_decisions, blockers, notes.
         started_at/finished_at: ISO timestamps. If omitted, started_at defaults to NOW().
         tool_calls: Number of tool calls in this cycle.
         tokens_used: Total tokens consumed."""
@@ -109,7 +109,7 @@ def register_cycle_tools(mcp: FastMCP):
     @mcp.tool()
     async def progress_load(
         task_id: int,
-        instance_id: Optional[str] = None,
+        instance_id: str | None = None,
         limit: int = 5,
     ) -> list[dict]:
         """Load recent progress entries for a task across cycles.

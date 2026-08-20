@@ -4,6 +4,7 @@ Fetches active tasks, checks GitHub PRs, classifies into action buckets.
 Outputs JSON protocol: start if actionable items found, skip if all clean.
 """
 
+import contextlib
 import json
 import subprocess
 
@@ -53,17 +54,15 @@ def gh_pr_comments(owner_repo, num):
     ]:
         try:
             r = subprocess.run(
-                ["gh", "api", ep, "--jq", ".[] | {a: .user.login, t: .created_at, b: .body}"],
+                ["gh", "api", "--paginate", ep, "--jq", ".[] | {a: .user.login, t: .created_at, b: .body}"],
                 capture_output=True,
                 text=True,
                 timeout=15,
             )
             if r.returncode == 0 and r.stdout.strip():
                 for line in r.stdout.strip().split("\n"):
-                    try:
+                    with contextlib.suppress(json.JSONDecodeError):
                         comments.append(json.loads(line))
-                    except json.JSONDecodeError:
-                        pass
         except Exception:
             pass
     return comments
@@ -84,9 +83,13 @@ def classify_gh(pr, last_addressed=""):
     if pr.get("mergeable") == "CONFLICTING":
         issues.append("conflict")
     checks = pr.get("statusCheckRollup") or []
-    failed = [c.get("name", "?") for c in checks if c.get("conclusion") == "FAILURE"]
+    failed_checks = [c for c in checks if c.get("conclusion") == "FAILURE"]
+    failed = [c.get("name", "?") for c in failed_checks]
     if failed:
         issues.append(f"ci_fail:{','.join(failed)}")
+        konflux_urls = [c.get("detailsUrl", "") for c in failed_checks if "pipelinerun" in c.get("detailsUrl", "")]
+        if konflux_urls:
+            issues.append(f"konflux_urls:{';'.join(konflux_urls)}")
     if pr.get("reviewDecision") == "CHANGES_REQUESTED":
         issues.append("changes_requested")
     last_prefix = last_addressed[:16] if last_addressed else ""
@@ -179,13 +182,17 @@ def fmt_task(enriched):
     for p in enriched["prs"]:
         issue_str = ",".join(p["issues"]) if p["issues"] else "clean"
         lines.append(f"  PR {p['repo']}#{p['num']} (github) state={p['state']} [{issue_str}]")
+        for issue in p["issues"]:
+            if issue.startswith("konflux_urls:"):
+                for url in issue.split(":", 1)[1].split(";"):
+                    lines.append(f"    konflux_details: {url}")
     last_addr = enriched["task"].get("last_addressed")
     if enriched["pr_comments"]:
         lines.append(fmt_comments(enriched["pr_comments"], "pr_comments", since=last_addr))
     return "\n".join(lines)
 
 
-def main():
+def main(suppress_terminal_if_addressed=False):
     if not INSTANCE_ID:
         output_result("error", "BOT_INSTANCE_ID not set")
         return
@@ -208,15 +215,28 @@ def main():
     for e in enriched:
         issues = e["issues"]
         if "merged" in issues:
-            merged.append(e)
+            if suppress_terminal_if_addressed and e["task"].get("last_addressed") and not has_new_feedback(e):
+                clean.append(e)
+            else:
+                merged.append(e)
         elif "closed" in issues:
-            closed.append(e)
+            if suppress_terminal_if_addressed and e["task"].get("last_addressed") and not has_new_feedback(e):
+                clean.append(e)
+            else:
+                closed.append(e)
         elif any(i.startswith("ci_fail") for i in issues):
-            ci_fail.append(e)
+            ci_only = all(i.startswith(("ci_fail", "konflux_urls")) for i in issues)
+            if ci_only and e["task"].get("last_addressed") and not has_new_feedback(e):
+                clean.append(e)
+            else:
+                ci_fail.append(e)
         elif "conflict" in issues:
             conflict.append(e)
         elif any(i in ("changes_requested",) or i.startswith("review:") for i in issues):
-            feedback.append(e)
+            if has_new_feedback(e) or not e["task"].get("last_addressed"):
+                feedback.append(e)
+            else:
+                clean.append(e)
         elif has_new_feedback(e):
             feedback.append(e)
         else:

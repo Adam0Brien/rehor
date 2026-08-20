@@ -12,6 +12,8 @@ from pathlib import Path
 
 import yaml
 
+from .constants import _DEFAULT_COOLDOWN_SECONDS
+
 
 @dataclass
 class Config:
@@ -21,6 +23,7 @@ class Config:
     idle_interval: int
     cycle_timeout: int
     board_key: str
+    idle_reminder_cooldown_seconds: int = _DEFAULT_COOLDOWN_SECONDS
 
 
 @dataclass
@@ -31,6 +34,7 @@ class InstanceConfig:
     source: str = "jira"
     envs: list[str] | None = None  # None = all available, [] = none
     claude_md_strategy: str = "ignore"  # replace / append / ignore
+    idle_cycle_limit: int = 0  # 0 = feature disabled
 
     @classmethod
     def from_yaml(cls, path: Path) -> InstanceConfig:
@@ -43,6 +47,7 @@ class InstanceConfig:
             source=data.get("source", "jira"),
             envs=data.get("envs"),
             claude_md_strategy=strategy,
+            idle_cycle_limit=int(data.get("idle_cycle_limit", 0)),
         )
 
     @classmethod
@@ -75,6 +80,19 @@ def load_instance_config(remote_agent_dir: Path | None) -> InstanceConfig:
     return ic
 
 
+def resolve_workflow_dir(
+    script_dir: Path,
+    workflow: str,
+    remote_agent_dir: Path | None = None,
+) -> Path:
+    """Resolve workflow directory. './' prefix = relative to remote agent dir."""
+    if workflow.startswith("./"):
+        if remote_agent_dir is None:
+            raise SystemExit(f"Workflow '{workflow}' uses relative path but no remote config available")
+        return remote_agent_dir / workflow[2:]
+    return script_dir / "presets" / "workflows" / workflow
+
+
 def resolve_active_envs(script_dir: Path, instance_config: InstanceConfig) -> list[str]:
     """Resolve which env presets are active. None = all available."""
     if instance_config.envs is not None:
@@ -85,16 +103,20 @@ def resolve_active_envs(script_dir: Path, instance_config: InstanceConfig) -> li
     return sorted(d.name for d in envs_dir.iterdir() if d.is_dir() and d.name != ".gitkeep")
 
 
-def validate_instance_config(script_dir: Path, instance_config: InstanceConfig) -> None:
+def validate_instance_config(
+    script_dir: Path,
+    instance_config: InstanceConfig,
+    remote_agent_dir: Path | None = None,
+) -> None:
     """Validate instance config references exist. FATAL on missing workflow, WARNING on missing env."""
     logger = logging.getLogger(__name__)
-    presets = script_dir / "presets"
 
-    wf_dir = presets / "workflows" / instance_config.workflow
+    wf_dir = resolve_workflow_dir(script_dir, instance_config.workflow, remote_agent_dir)
     if not wf_dir.is_dir():
         logger.error("FATAL: Workflow preset '%s' not found at %s", instance_config.workflow, wf_dir)
         sys.exit(1)
 
+    presets = script_dir / "presets"
     if instance_config.envs is not None:
         for env in instance_config.envs:
             env_dir = presets / "envs" / env
@@ -127,6 +149,7 @@ def load_config(script_dir: Path) -> Config:
         idle_interval=raw["polling"].get("idleIntervalSeconds", 300),
         cycle_timeout=raw["claude"].get("cycleTimeoutSeconds", 1800),
         board_key=raw["jira"]["boardKey"],
+        idle_reminder_cooldown_seconds=raw["polling"].get("idleReminderCooldownSeconds", _DEFAULT_COOLDOWN_SECONDS),
     )
 
 
@@ -183,9 +206,13 @@ def _resolve_env_vars(obj):
     return obj
 
 
-def load_manifest(script_dir: Path, workflow: str) -> dict | None:
+def load_manifest(
+    script_dir: Path,
+    workflow: str,
+    remote_agent_dir: Path | None = None,
+) -> dict | None:
     """Load manifest.yaml for a workflow preset. Returns None if not found."""
-    path = script_dir / "presets" / "workflows" / workflow / "manifest.yaml"
+    path = resolve_workflow_dir(script_dir, workflow, remote_agent_dir) / "manifest.yaml"
     if not path.is_file():
         return None
     with open(path) as f:
@@ -196,6 +223,7 @@ def validate_manifest(
     script_dir: Path,
     workflow: str,
     mcp_servers: dict,
+    remote_agent_dir: Path | None = None,
 ) -> None:
     """Validate workflow manifest requirements at startup.
 
@@ -203,7 +231,7 @@ def validate_manifest(
     WARNING on missing optional env vars or absent manifest.
     """
     logger = logging.getLogger(__name__)
-    manifest = load_manifest(script_dir, workflow)
+    manifest = load_manifest(script_dir, workflow, remote_agent_dir)
     if manifest is None:
         logger.warning("No manifest.yaml for workflow '%s' — skipping validation", workflow)
         return

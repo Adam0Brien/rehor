@@ -1,25 +1,23 @@
 """Tests for preflight shared modules (presets/shared/preflight/)."""
 
-import json
 import sys
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
 SHARED_DIR = Path(__file__).resolve().parent.parent.parent / "presets" / "shared" / "preflight"
 sys.path.insert(0, str(SHARED_DIR))
 
-from common import (  # noqa: E402
+from unittest.mock import MagicMock
+
+from common import (
     build_repo_lookup,
     fmt_comments,
     is_bot_author,
     upstream_repo,
 )
-from gh_pr_status import classify_gh, has_new_feedback  # noqa: E402
-from gl_mr_status import classify_gl  # noqa: E402
-from gl_mr_status import has_new_feedback as gl_has_new_feedback  # noqa: E402
-
+from gh_pr_status import classify_gh, gh_pr_comments, has_new_feedback
+from gl_mr_status import classify_gl, gl_mr_notes
+from gl_mr_status import has_new_feedback as gl_has_new_feedback
 
 # --- upstream_repo ---
 
@@ -235,6 +233,113 @@ def test_changes_requested_still_unconditional():
         assert unconditional is True, f"{issue} should be unconditional feedback"
 
 
+# --- CI-only skip (bucket classification) ---
+
+
+def _make_ci_enriched(last_addressed=None, extra_issues=None, pr_comments=None):
+    """Helper to build enriched dicts for CI bucket tests."""
+    issues = ["ci_fail:lint,test"]
+    if extra_issues:
+        issues.extend(extra_issues)
+    return {
+        "task": {
+            "external_key": "TEST-1",
+            "status": "pr_open",
+            "repo": "test-repo",
+            **({"last_addressed": last_addressed} if last_addressed else {}),
+        },
+        "prs": [{"repo": "test-repo", "num": 1, "host": "github", "state": "OPEN", "issues": issues, "data": {}}],
+        "pr_comments": pr_comments or [],
+        "issues": issues,
+    }
+
+
+def _classify_bucket(enriched_list):
+    """Reproduce the bucket classification from main() for testing."""
+    merged, closed, ci_fail, conflict, feedback, clean = [], [], [], [], [], []
+    for e in enriched_list:
+        issues = e["issues"]
+        if "merged" in issues:
+            merged.append(e)
+        elif "closed" in issues:
+            closed.append(e)
+        elif any(i.startswith("ci_fail") for i in issues):
+            ci_only = all(i.startswith(("ci_fail", "konflux_urls")) for i in issues)
+            if ci_only and e["task"].get("last_addressed") and not has_new_feedback(e):
+                clean.append(e)
+            else:
+                ci_fail.append(e)
+        elif "conflict" in issues:
+            conflict.append(e)
+        elif any(i in ("changes_requested",) or i.startswith("review:") for i in issues):
+            if has_new_feedback(e) or not e["task"].get("last_addressed"):
+                feedback.append(e)
+            else:
+                clean.append(e)
+        elif has_new_feedback(e):
+            feedback.append(e)
+        else:
+            clean.append(e)
+    return {"ci_fail": ci_fail, "clean": clean, "feedback": feedback}
+
+
+def test_ci_only_addressed_is_clean():
+    """CI-only failure with last_addressed set and no new feedback → clean."""
+    e = _make_ci_enriched(last_addressed="2026-07-14T17:49")
+    result = _classify_bucket([e])
+    assert len(result["clean"]) == 1
+    assert len(result["ci_fail"]) == 0
+
+
+def test_ci_only_no_last_addressed_is_actionable():
+    """CI-only failure without last_addressed → still actionable (first encounter)."""
+    e = _make_ci_enriched(last_addressed=None)
+    result = _classify_bucket([e])
+    assert len(result["ci_fail"]) == 1
+    assert len(result["clean"]) == 0
+
+
+def test_ci_plus_conflict_is_actionable():
+    """CI failure combined with conflict → actionable even with last_addressed."""
+    e = _make_ci_enriched(last_addressed="2026-07-14T17:49", extra_issues=["conflict"])
+    result = _classify_bucket([e])
+    assert len(result["ci_fail"]) == 1
+    assert len(result["clean"]) == 0
+
+
+def test_ci_only_with_new_feedback_is_actionable():
+    """CI-only with last_addressed but new human comment → actionable."""
+    e = _make_ci_enriched(
+        last_addressed="2026-07-14T10:00",
+        pr_comments=[{"a": "reviewer", "t": "2026-07-14T18:00", "b": "can you retry CI?"}],
+    )
+    result = _classify_bucket([e])
+    assert len(result["ci_fail"]) == 1
+    assert len(result["clean"]) == 0
+
+
+def test_ci_only_with_old_feedback_is_clean():
+    """CI-only with last_addressed after the last comment → clean."""
+    e = _make_ci_enriched(
+        last_addressed="2026-07-14T18:00",
+        pr_comments=[{"a": "reviewer", "t": "2026-07-14T10:00", "b": "can you retry CI?"}],
+    )
+    result = _classify_bucket([e])
+    assert len(result["clean"]) == 1
+    assert len(result["ci_fail"]) == 0
+
+
+def test_ci_plus_changes_requested_is_actionable():
+    """CI failure + changes_requested should not be classified as CI-only."""
+    e = _make_ci_enriched(
+        last_addressed="2026-07-14T17:49",
+        extra_issues=["changes_requested"],
+    )
+    result = _classify_bucket([e])
+    assert len(result["ci_fail"]) == 1
+    assert len(result["clean"]) == 0
+
+
 # --- classify_gl ---
 
 
@@ -332,3 +437,65 @@ def test_gl_has_new_feedback_bot_ignored():
         "mr_notes": [{"a": "my-app[bot]", "t": "2026-07-01T10:00", "b": "automated check"}],
     }
     assert gl_has_new_feedback(enriched) is False
+
+
+# --- pagination (GH + GL) ---
+
+
+def test_gh_pr_comments_uses_paginate():
+    """gh api calls include --paginate to fetch all pages of comments."""
+    import json as json_mod
+
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+    mock_result.stdout = json_mod.dumps({"a": "user", "t": "2026-07-01T10:00", "b": "hi"})
+
+    with patch("gh_pr_status.subprocess.run", return_value=mock_result) as mock_run:
+        gh_pr_comments("org/repo", 1)
+        for call in mock_run.call_args_list:
+            cmd = call[0][0]
+            assert "--paginate" in cmd, f"--paginate missing from command: {cmd}"
+
+
+def test_gl_mr_notes_uses_paginate():
+    """glab api calls include --paginate to fetch all pages of notes."""
+    import json as json_mod
+
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+    mock_result.stdout = json_mod.dumps(
+        [
+            {"author": {"username": "reviewer"}, "created_at": "2026-07-01T10:00:00", "body": "note", "system": False},
+        ]
+    )
+
+    with patch("gl_mr_status.subprocess.run", return_value=mock_result) as mock_run:
+        notes = gl_mr_notes("team/project", 42)
+        cmd = mock_run.call_args[0][0]
+        assert "--paginate" in cmd, f"--paginate missing from command: {cmd}"
+        assert len(notes) == 1
+        assert notes[0]["a"] == "reviewer"
+
+
+def test_gl_mr_notes_filters_system():
+    """System notes are excluded from results."""
+    import json as json_mod
+
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+    mock_result.stdout = json_mod.dumps(
+        [
+            {
+                "author": {"username": "reviewer"},
+                "created_at": "2026-07-01T10:00:00",
+                "body": "looks good",
+                "system": False,
+            },
+            {"author": {"username": "gitlab"}, "created_at": "2026-07-01T10:01:00", "body": "merged", "system": True},
+        ]
+    )
+
+    with patch("gl_mr_status.subprocess.run", return_value=mock_result):
+        notes = gl_mr_notes("team/project", 42)
+        assert len(notes) == 1
+        assert notes[0]["b"] == "looks good"

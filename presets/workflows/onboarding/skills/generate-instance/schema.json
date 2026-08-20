@@ -1,0 +1,147 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "generate-instance requirements",
+  "type": "object",
+  "required": ["instance_name"],
+  "properties": {
+    "instance_name": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$",
+      "description": "Name of the bot instance repo (e.g. my-team-agent-dev)"
+    },
+    "config_name": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$",
+      "description": "Name of the config directory under instance/"
+    },
+    "team_name": {
+      "type": "string",
+      "description": "Human-readable team name"
+    },
+    "workflow": {
+      "type": "string",
+      "enum": ["jira-sprint", "jira-kanban", "onboarding"],
+      "default": "jira-sprint"
+    },
+    "source": {
+      "type": "string",
+      "enum": ["jira"],
+      "default": "jira"
+    },
+    "envs": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+      "description": "List of env presets to install (e.g. node, go, browser, slack)"
+    },
+    "bot_name": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$",
+      "description": "Deployment name (defaults to devbot-<config_name>)"
+    },
+    "bot_label": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9:_-]*$",
+      "description": "Jira label the bot filters on (defaults to rehor-ai-<config_name>)"
+    },
+    "repos": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "url"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]*$",
+            "description": "Short name used as key in project-repos.json"
+          },
+          "url": {
+            "type": "string",
+            "pattern": "^https?://",
+            "description": "Upstream repo URL (HTTPS)"
+          },
+          "host": {
+            "type": "string",
+            "enum": ["github", "gitlab"],
+            "default": "github"
+          },
+          "fork_account": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]*$",
+            "description": "Fork owner (defaults to platex-rehor-bot / platform-experience-services-bot)"
+          },
+          "fork_name": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]*$",
+            "description": "Custom fork repo name if different from upstream"
+          },
+          "readonly": {
+            "type": "boolean",
+            "default": false,
+            "description": "If true, no fork is created — repo is read-only"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "resources": {
+      "type": "object",
+      "properties": {
+        "cpu_request": { "type": "string", "pattern": "^[0-9]+(m|Mi|Gi|Ki)?$" },
+        "cpu_limit": { "type": "string", "pattern": "^[0-9]+(m|Mi|Gi|Ki)?$" },
+        "memory_request": { "type": "string", "pattern": "^[0-9]+(m|Mi|Gi|Ki)?$" },
+        "memory_limit": { "type": "string", "pattern": "^[0-9]+(m|Mi|Gi|Ki)?$" },
+        "ephemeral_request": { "type": "string", "pattern": "^[0-9]+(m|Mi|Gi|Ki)?$" },
+        "ephemeral_limit": { "type": "string", "pattern": "^[0-9]+(m|Mi|Gi|Ki)?$" }
+      },
+      "additionalProperties": false
+    },
+    "keda_schedule": {
+      "type": "object",
+      "properties": {
+        "timezone": { "type": "string", "pattern": "^[A-Za-z_/]+$" },
+        "start": { "type": "string", "pattern": "^[0-9*,/ -]+$" },
+        "end": { "type": "string", "pattern": "^[0-9*,/ -]+$" }
+      },
+      "required": ["timezone", "start", "end"],
+      "additionalProperties": false
+    },
+    "repo_url": {
+      "type": "string",
+      "pattern": "^https?://",
+      "description": "Instance repo URL (e.g. https://github.com/MyOrg/my-agent-dev)"
+    },
+    "github_org": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]*$",
+      "description": "GitHub org (used to construct repo_url if repo_url not provided)"
+    },
+    "claude_md_strategy": {
+      "type": "string",
+      "enum": ["append", "replace", "ignore"],
+      "default": "append"
+    },
+    "tech_stacks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "repo": { "type": "string" },
+          "envs": {
+            "type": "array",
+            "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" }
+          },
+          "personas": {
+            "type": "array",
+            "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" }
+          }
+        }
+      }
+    },
+    "target_branch": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._/-]*$",
+      "default": "main"
+    }
+  },
+  "additionalProperties": false
+}

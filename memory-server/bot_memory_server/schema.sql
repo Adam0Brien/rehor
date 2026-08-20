@@ -113,6 +113,7 @@ DO $$ BEGIN
     ALTER TABLE cycles ADD COLUMN IF NOT EXISTS repo TEXT;
     ALTER TABLE cycles ADD COLUMN IF NOT EXISTS work_type TEXT;
     ALTER TABLE cycles ADD COLUMN IF NOT EXISTS summary TEXT;
+    ALTER TABLE cycles ADD COLUMN IF NOT EXISTS instance_id TEXT;
 EXCEPTION
     WHEN duplicate_column THEN NULL;
 END $$;
@@ -126,6 +127,20 @@ CREATE TABLE IF NOT EXISTS slack_notifications (
     sent_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS slack_digest_queue (
+    id              SERIAL PRIMARY KEY,
+    instance_id     TEXT,
+    jira_key        TEXT NOT NULL,
+    event_type      TEXT NOT NULL,
+    pr_url          TEXT,
+    pr_number       INTEGER,
+    repo            TEXT,
+    title           TEXT,
+    message         TEXT NOT NULL,
+    queued_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    sent            BOOLEAN NOT NULL DEFAULT FALSE
+);
+
 CREATE TABLE IF NOT EXISTS org_members (
     id              SERIAL PRIMARY KEY,
     username        TEXT NOT NULL,
@@ -137,15 +152,22 @@ CREATE TABLE IF NOT EXISTS org_members (
 
 -- Multi-instance bot status tracking
 CREATE TABLE IF NOT EXISTS bot_instances (
-    instance_id     TEXT PRIMARY KEY,
-    state           TEXT NOT NULL DEFAULT 'idle',
-    message         TEXT NOT NULL DEFAULT '',
-    external_key    TEXT,
-    source_type     TEXT,
-    repo            TEXT,
-    cycle_start     TIMESTAMPTZ,
-    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    instance_id                 TEXT PRIMARY KEY,
+    state                       TEXT NOT NULL DEFAULT 'idle',
+    message                     TEXT NOT NULL DEFAULT '',
+    external_key                TEXT,
+    source_type                 TEXT,
+    repo                        TEXT,
+    cycle_start                 TIMESTAMPTZ,
+    updated_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    idle_consecutive_cycles     INTEGER NOT NULL DEFAULT 0,
+    last_idle_reminder_sent_at  TIMESTAMPTZ
 );
+
+-- Idempotent column changes for existing databases
+ALTER TABLE bot_instances ADD COLUMN IF NOT EXISTS idle_consecutive_cycles    INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE bot_instances ADD COLUMN IF NOT EXISTS last_idle_reminder_sent_at TIMESTAMPTZ;
+ALTER TABLE bot_instances DROP COLUMN IF EXISTS last_seen;
 
 -- Migrate existing bot_status row into bot_instances (if instance_id is set)
 DO $$ BEGIN
@@ -170,9 +192,12 @@ CREATE TABLE IF NOT EXISTS cycle_runs (
     tokens_used     INTEGER,
     progress        JSONB,
     transcript      BYTEA,
+    input_prompt    TEXT,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Migration: add input_prompt to existing cycle_runs tables
+ALTER TABLE cycle_runs ADD COLUMN IF NOT EXISTS input_prompt TEXT;
 
 -- Only create index if table has enough rows (ivfflat needs data)
 -- On first startup with empty table, queries fall back to sequential scan

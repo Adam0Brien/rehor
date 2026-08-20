@@ -7,6 +7,9 @@ dependencies = [
     "claude-agent-sdk",
     "filelock",
     "httpx",
+    "jinja2>=3.1",
+    "jsonschema>=4.20",
+    "prometheus-client",
     "python-dotenv",
     "pyyaml>=6.0",
     "zstandard>=0.23",
@@ -19,6 +22,7 @@ dev = [
     "pre-commit",
     "httpx>=0.27.0",
     "mcp>=1.1.0",
+    "mypy>=1.11.0",
     "ruff>=0.8.0",
 ]
 
@@ -35,11 +39,26 @@ dev-bot = "bot.run:main"
 [tool.pytest.ini_options]
 testpaths = [
     "bot/tests",
-    ".claude/skills/auto-fork/tests",
-    ".claude/skills/claim-ticket/tests",
-    ".claude/skills/post-pr/tests",
-    ".claude/skills/push-and-pr/tests",
+    "dashboard/tests",
+    "presets/shared/skills/auto-fork/tests",
+    "presets/shared/skills/post-pr/tests",
+    "presets/shared/skills/push-and-pr/tests",
+    "presets/workflows/jira-sprint/skills/claim-ticket/tests",
+    "presets/workflows/jira-kanban/skills/claim-ticket/tests",
+    "presets/workflows/onboarding/skills/generate-instance/tests",
+    "presets/workflows/onboarding/skills/generate-konflux/tests",
+    "presets/workflows/onboarding/skills/generate-app-interface/tests",
+    "presets/workflows/onboarding/skills/detect-tech-stack/tests",
+    "presets/workflows/onboarding/skills/post-plan/tests",
+    "presets/workflows/onboarding/skills/post-manual-steps/tests",
+    "presets/workflows/onboarding/skills/post-konflux-questions/tests",
+    "presets/workflows/onboarding/skills/post-konflux-instructions/tests",
+    "presets/workflows/onboarding/skills/post-intake/tests",
+    "presets/workflows/onboarding/skills/claim-onboarding/tests",
+    "presets/workflows/onboarding/skills/create-phase-tickets/tests",
+    ".claude/skills/tests",
 ]
+pythonpath = ["dashboard/tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
@@ -50,10 +69,36 @@ line-length = 120
 target-version = "py312"
 
 [tool.ruff.lint]
-select = ["E", "W", "F", "I", "B", "C4"]
+select = ["E", "W", "F", "I", "B", "C4", "UP", "SIM", "RUF"]
+ignore = [
+    "E501",    # line too long (handled by formatter)
+    "SIM108",  # ternary operator (readability preference)
+    "RUF001",  # ambiguous unicode (false positives on docs)
+    "RUF059",  # unused unpacked variable (too noisy for test fixtures)
+]
 
 [tool.ruff.lint.per-file-ignores]
-"*/tests/*" = ["E501"]
+"*/tests/*" = ["E501", "E402"]
+"tests/*" = ["E501", "E402"]
+"memory-server/seed_from_json.py" = ["E501"]
+"memory-server/bot_memory_server/server.py" = ["E402"]
+".claude/skills/*" = ["SIM105"]
 
 [tool.uv.workspace]
 members = ["memory-server"]
+
+[tool.coverage.run]
+source = ["bot"]
+omit = ["bot/tests/*"]
+
+[tool.coverage.report]
+fail_under = 50
+show_missing = true
+
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = false
+warn_unused_configs = true
+ignore_missing_imports = true
+files = ["bot/"]
+disable_error_code = ["var-annotated", "no-any-return", "union-attr", "assignment"]

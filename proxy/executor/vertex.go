@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -64,16 +65,19 @@ func NewVertexProxy(projectID, region string, ts oauth2.TokenSource, policy *Ver
 		if err != nil {
 			http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusBadRequest)
 			log.Printf("vertex: bad-request path=%s err=%s", r.URL.Path, err)
+			VertexModelRequestsTotal.WithLabelValues("unknown", "bad_path").Inc()
 			return
 		}
 		if err := policy.Check(model); err != nil {
 			http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusForbidden)
 			log.Printf("vertex: policy-deny model=%s", model)
+			VertexModelRequestsTotal.WithLabelValues(model, "denied").Inc()
 			return
 		}
 
 		rec := &statusRecorder{ResponseWriter: w}
 		proxy.ServeHTTP(rec, r)
+		VertexModelRequestsTotal.WithLabelValues(model, strconv.Itoa(rec.status)).Inc()
 
 		log.Printf("vertex: model=%s method=%s status=%d size=%d dur=%s",
 			model, method, rec.status, r.ContentLength,
@@ -94,18 +98,4 @@ func rewritePath(path, projectID, region string) string {
 		}
 	}
 	return strings.Join(parts, "/")
-}
-
-type statusRecorder struct {
-	http.ResponseWriter
-	status int
-}
-
-func (r *statusRecorder) WriteHeader(code int) {
-	r.status = code
-	r.ResponseWriter.WriteHeader(code)
-}
-
-func (r *statusRecorder) Unwrap() http.ResponseWriter {
-	return r.ResponseWriter
 }

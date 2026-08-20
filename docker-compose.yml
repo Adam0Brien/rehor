@@ -25,6 +25,7 @@ services:
     environment:
       DATABASE_URL: postgresql://bot:bot@postgres:5432/bot_memory
       TRUSTED_BOT_ACCOUNTS: "${TRUSTED_BOT_ACCOUNTS:-}"
+      KUBEARCHIVE_TOKEN: "${KUBEARCHIVE_TOKEN:-}"
     depends_on:
       postgres:
         condition: service_healthy
@@ -56,6 +57,8 @@ services:
       - JIRA_URL=${JIRA_URL:-https://redhat.atlassian.net}
       - JIRA_USERNAME
       - JIRA_API_TOKEN
+      - GLITCHTIP_URL
+      - GLITCHTIP_TOKEN
     volumes:
       - executor-sock:/var/run/devbot
     healthcheck:
@@ -106,6 +109,8 @@ services:
       - JIRA_MCP_URL=http://proxy:8444/mcp
       # GH release upload — proxied through proxy container (port 8446)
       - GH_RELEASE_UPLOAD_URL=http://proxy:8446/upload
+      # Git auth — proxied through proxy container (port 8447)
+      - GIT_AUTH_PROXY_HOST=proxy
       # Route all HTTP/HTTPS through the Squid proxy
       - HTTP_PROXY=http://proxy:3128
       - HTTPS_PROXY=http://proxy:3128

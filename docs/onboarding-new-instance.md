@@ -2,7 +2,7 @@
 
 How to add a new bot runner instance to the shared OpenShift cluster. Each instance gets its own Jira label, repo set, and personas, but shares the memory server, database, and Vault secrets deployed by the primary instance (platform-frontend-ai-dev). Instances share the proxy by default, but can optionally deploy their own proxy for custom Jira credentials.
 
-For the system architecture, see [ARCHITECTURE.md](../ARCHITECTURE.md).
+For the system architecture, see [ARCHITECTURE.md](https://github.com/RedHatInsights/platform-frontend-ai-dev/blob/master/ARCHITECTURE.md).
 
 ---
 
@@ -55,13 +55,25 @@ Create your instance config. This entire directory gets COPYed into the image at
 instance/my-config/
 └── agent/
     ├── instance.yaml         # preset selection (workflow, env presets, CLAUDE.md strategy)
+    ├── CLAUDE.md             # instance-specific instructions (optional, strategy-dependent)
     ├── project-repos.json    # repos this instance works on
     ├── mcp.json              # MCP server overrides (usually just Jira)
-    └── personas/             # domain-specific guidelines
-        ├── frontend/
-        │   └── prompt.md
-        └── ...
+    ├── personas/             # domain-specific guidelines
+    │   ├── frontend/
+    │   │   └── prompt.md
+    │   └── ...
+    ├── extra-hosts           # custom /etc/hosts entries for browser preset (optional)
+    ├── preflight/            # instance-specific preflight scripts (optional)
+    │   └── 01-check-something.py
+    └── workflows/            # custom workflows (optional, if not using a built-in)
+        └── my-workflow/
+            ├── CLAUDE.md
+            ├── manifest.yaml
+            └── preflight/
+                └── 01-check.py
 ```
+
+Instance-level `preflight/` scripts run alongside the workflow's preflight scripts — use them for checks specific to your instance. Custom `workflows/` are referenced via `workflow: ./workflows/<name>` in `instance.yaml`. See [Creating Custom Workflows](presets/custom-workflows.md) and [Writing Custom Preflight Scripts](presets/custom-preflight.md) for details.
 
 #### `instance.yaml`
 
@@ -78,20 +90,26 @@ envs:
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `workflow` | string | `jira-sprint` | Which workflow preset to use. Must exist in `presets/workflows/`. |
-| `source` | string | `jira` | Ticket source. Currently: `jira`. Future: `github`, `gitlab`. |
+| `workflow` | string | `jira-sprint` | Workflow preset name (built-in) or `./path` (custom). See below. |
+| `source` | string | `jira` | Ticket source. `jira` = Jira sprint polling. `scheduled` = time-based. |
 | `envs` | list or null | `null` (all) | Env presets to activate. `null`/omitted = all available. `[]` = none. |
 | `claude_md.strategy` | string | `ignore` | How to handle instance CLAUDE.md: `ignore`, `append`, `replace`. |
 
-Available env presets:
-- `browser` — Chromium + chrome-devtools MCP for visual verification (requires `PLAYWRIGHT_BROWSERS_PATH`, set automatically)
-- `container-scan` — Grype + Buildah for CVE scanning
-- `slack` — Slack notifications via webhook (requires `SLACK_WEBHOOK_URL`)
-- `dev-proxy` — Caddy reverse proxy for stage UI verification (requires `PROXY_HOST`)
+**Workflows:** The built-in `jira-sprint` workflow handles the full autonomous development loop (triage → implement → PR → maintain). For specialized use cases — monitoring, review-only, scheduled tasks — you can create custom workflows in your instance config repo using `workflow: ./workflows/<name>`. See [Creating Custom Workflows](presets/custom-workflows.md) for the full guide.
 
-List only the presets your instance actually needs. Omitting unused ones saves container startup time and avoids unnecessary env var requirements.
+**Env presets** add tools and runtimes to the bot image. List only what your instance needs — unused presets waste build time and image size.
 
-For the full preset system reference, see [preset-migration-guide.md](migrations/preset-migration-guide.md).
+| Preset | What it provides |
+|--------|-----------------|
+| `node` | nvm + Node.js 22 LTS + npm/npx |
+| `go` | goenv + Go 1.24/1.25 + golangci-lint |
+| `patternfly-mcp` | PatternFly component guidance MCP server (requires `node`) |
+| `browser` | Chromium + chrome-devtools MCP for visual verification |
+| `container-scan` | Grype + Buildah for CVE scanning |
+| `dev-proxy` | Caddy reverse proxy for stage UI verification |
+| `slack` | Slack notifications via webhook |
+
+For the full preset system reference, see the [Presets overview](presets/README.md), [env presets](presets/envs.md), and [workflow presets](presets/workflows.md).
 
 #### `project-repos.json`
 
@@ -488,12 +506,48 @@ After deploying, verify in order:
 | `BOT_BOARD_NAME` | no | Jira board name (for sprint assignment only) |
 | `BOT_SPRINT_PREFIX` | no | Sprint name prefix filter (for sprint assignment only) |
 | `BOT_INCLUDE_BACKLOG` | no | `'true'` to include backlog tickets |
-| `SLACK_WEBHOOK_URL` | no | Slack webhook for notifications |
+| `SLACK_WEBHOOK_URL` | no | Slack webhook — Incoming (`/services/`, recommended) or Workflow Builder (`/triggers/`) |
+| `SLACK_NOTIFY_MODE` | no | `immediate` (default) or `daily_digest`. In digest mode, individual notifications are suppressed and a daily snapshot of open PRs is sent instead. Requires `SLACK_DIGEST_HOUR` to be set. |
+| `SLACK_DIGEST_HOUR` | no | UTC hour (0-23) when daily digest is sent. Opt-in — digest is disabled unless this is set. |
 | `PROXY_IMAGE` | no | Proxy container image (only needed if `PROXY_REPLICAS=1`) |
 | `PROXY_IMAGE_TAG` | no | Proxy image tag (default: `latest`) |
 | `PROXY_REPLICAS` | no | `'0'` = use shared proxy (default), `'1'` = deploy own proxy |
 | `PROXY_NAME` | no | Proxy service name (default: `devbot-proxy`). Set to a unique name when deploying own proxy. |
 | `JIRA_SECRET_NAME` | no | Vault secret with `jira-email` + `jira-token` keys (default: `devbot-secrets`) |
+
+---
+
+## Slack Workspace Configuration
+
+Bot instances connect to a specific Slack workspace via their `SLACK_USER_TOKEN`. The token determines which workspace the bot operates in — production or sandbox.
+
+### Production vs Sandbox
+
+| | Production | Sandbox |
+|---|---|---|
+| Workspace | `redhat.enterprise.slack.com` | `redhat-sandbox.enterprise.slack.com` |
+| Token | `xoxp-...` from production Vault | `xoxp-...` from sandbox workspace |
+| Channel IDs | Different per workspace | Different per workspace |
+| Custom emoji | Workspace-specific | Must exist in sandbox too |
+
+The `hcc-framework-agent-dev` instance connects to the **production** Slack grid. To test Slack features against the sandbox workspace, you need either:
+
+- **Option A: Separate dev instance** — deploy a new instance with sandbox-specific Vault secrets (sandbox `SLACK_USER_TOKEN`, sandbox channel IDs, sandbox emoji names). This is the cleanest approach.
+- **Option B: Direct production testing** — skip sandbox entirely and test in the existing dev instance against production Slack (requires Slack app approval for production workspace).
+
+### Slack Environment Variables
+
+When pointing an instance at a different workspace, update all Slack-related parameters:
+
+| Variable | Description |
+|----------|-------------|
+| `SLACK_USER_TOKEN` | `xoxp-...` token for the target workspace |
+| `SLACK_OPEN_PRS_CHANNEL` | Channel ID for the Open PRs thread (workspace-specific) |
+| `SLACK_EMOJI_APPROVED` | Emoji name for approved PRs (e.g. `lgtm-5363`) |
+| `SLACK_EMOJI_MERGED` | Emoji name for merged PRs (e.g. `merged2`) |
+| `SLACK_WEBHOOK_URL` | Webhook URL (also workspace-specific) |
+
+Channel IDs and custom emoji names differ between workspaces — you cannot reuse production values in sandbox.
 
 ---
 
@@ -532,3 +586,16 @@ If someone renames the Jira board, `claim-ticket` breaks. Consider using `BOT_BO
 
 ### Memory server is shared
 All bot instances share one memory server. Task isolation is via `instance_id` — always pass it in task tool calls. Memories (learnings) are shared across instances, which is intentional.
+
+---
+
+## Related Docs
+
+- [Presets overview](presets/README.md) — how all preset types work together
+- [Workflow presets](presets/workflows.md) — built-in workflow reference
+- [Env presets](presets/envs.md) — available env presets for tools and runtimes
+- [Creating custom workflows](presets/custom-workflows.md) — guide to building your own workflow
+- [Writing custom preflight scripts](presets/custom-preflight.md) — pre-session data-gathering scripts
+- [Scheduling guide](scheduling.md) — KEDA cron scaler configuration
+- [Presets design doc](presets-design.md) — architecture decisions and rationale
+- [Roadmap](roadmap.md) — planned improvements

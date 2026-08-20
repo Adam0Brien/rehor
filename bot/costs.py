@@ -5,18 +5,21 @@ from __future__ import annotations
 import json
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import httpx
+
+from .constants import MEMORY_API_BASE
+from .metrics import record_cycle_metrics
 
 if TYPE_CHECKING:
     from .agent import CycleContext
 
 logger = logging.getLogger(__name__)
 
-COSTS_API = os.environ.get("COSTS_API_URL", "http://localhost:8080/api/costs")
+COSTS_API = os.environ.get("COSTS_API_URL", f"{MEMORY_API_BASE}/costs")
 
 
 _NO_WORK_PATTERNS = [
@@ -48,7 +51,7 @@ def _build_entry(label: str, result, ctx: CycleContext | None = None) -> dict:
         model = next(iter(model_usage.keys()), "")
 
     entry = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "label": label,
         "session_id": getattr(result, "session_id", ""),
         "num_turns": getattr(result, "num_turns", 0),
@@ -59,12 +62,13 @@ def _build_entry(label: str, result, ctx: CycleContext | None = None) -> dict:
         "cache_read_tokens": usage.get("cache_read_input_tokens", 0),
         "cache_write_tokens": usage.get("cache_creation_input_tokens", 0),
         "model": model,
+        "model_usage": model_usage if model_usage else {},
         "is_error": getattr(result, "subtype", "") != "success",
         "no_work": _is_no_work(result_text),
     }
 
     if ctx:
-        entry["jira_key"] = ctx.jira_key
+        entry["external_key"] = ctx.jira_key
         entry["repo"] = ctx.repo
         entry["work_type"] = ctx.work_type
         entry["summary"] = ctx.summary
@@ -72,13 +76,41 @@ def _build_entry(label: str, result, ctx: CycleContext | None = None) -> dict:
     return entry
 
 
-def record_cost(costs_file: Path, label: str, result, ctx: CycleContext | None = None) -> bool:
+def record_cost(
+    costs_file: Path,
+    label: str,
+    result,
+    ctx: CycleContext | None = None,
+    instance_id: str | None = None,
+    workflow: str = "unknown",
+) -> bool:
     """Record cost data from a ResultMessage.
 
-    Writes to costs.jsonl (local) and pushes to the dashboard API.
+    Writes to costs.jsonl (local), pushes to the dashboard API, and increments
+    agent Prometheus cost/token counters.
     Returns True if the cycle found no work (for sleep interval decision).
     """
     entry = _build_entry(label, result, ctx)
+    if instance_id:
+        entry["instance_id"] = instance_id
+
+    if entry["is_error"]:
+        status = "error"
+    elif entry["no_work"]:
+        status = "idle"
+    else:
+        status = "ok"
+    record_cycle_metrics(
+        model=entry["model"],
+        label=label,
+        workflow=workflow,
+        status=status,
+        cost_usd=entry["cost_usd"],
+        input_tokens=entry["input_tokens"],
+        output_tokens=entry["output_tokens"],
+        cache_read_tokens=entry["cache_read_tokens"],
+        cache_write_tokens=entry["cache_write_tokens"],
+    )
 
     # Write to local jsonl (backward compat with costs.sh)
     with open(costs_file, "a") as f:
@@ -86,8 +118,16 @@ def record_cost(costs_file: Path, label: str, result, ctx: CycleContext | None =
 
     # Push to dashboard API
     try:
-        httpx.post(COSTS_API, json=entry, timeout=3.0)
-    except Exception:
-        logger.debug("Failed to push cost to dashboard API (dashboard may be down)")
+        resp = httpx.post(COSTS_API, json=entry, timeout=3.0)
+        if not resp.is_success:
+            logger.warning(
+                "Cost push failed: HTTP %d: %s",
+                resp.status_code,
+                resp.text[:200],
+            )
+    except httpx.TimeoutException:
+        logger.warning("Cost push timed out after 3s")
+    except Exception as e:
+        logger.warning("Cost push failed: %s", e)
 
     return entry["no_work"]

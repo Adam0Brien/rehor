@@ -30,6 +30,18 @@ export async function unarchiveTask(key: string) {
   return fetch('/api/tasks/' + encodeURIComponent(key) + '/unarchive', { method: 'POST' });
 }
 
+export async function pauseTask(key: string, pausedReason?: string) {
+  return fetch('/api/tasks/' + encodeURIComponent(key) + '/pause', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ paused_reason: pausedReason || undefined }),
+  });
+}
+
+export async function unpauseTask(key: string) {
+  return fetch('/api/tasks/' + encodeURIComponent(key) + '/unpause', { method: 'POST' });
+}
+
 export async function fetchMemories(params: { category?: string; repo?: string; tag?: string; limit?: number; offset?: number }) {
   const qs = new URLSearchParams();
   if (params.category) qs.set('category', params.category);
@@ -65,11 +77,12 @@ export async function fetchEmbeddings() {
   return (await fetch('/api/memories/embeddings')).json();
 }
 
-export async function fetchCosts(days = 30, limit = 200, dateFrom?: string, dateTo?: string) {
+export async function fetchCosts(days = 30, limit = 200, dateFrom?: string, dateTo?: string, instanceId?: string) {
   const qs = new URLSearchParams({ limit: String(limit) });
   if (dateFrom) qs.set('from', dateFrom);
   if (dateTo) qs.set('to', dateTo);
   if (!dateFrom && !dateTo) qs.set('days', String(days));
+  if (instanceId) qs.set('instance_id', instanceId);
   return (await fetch(`/api/costs?${qs}`)).json();
 }
 
@@ -95,15 +108,11 @@ export async function fetchCycleRunTranscript(id: number): Promise<string> {
   return res.text();
 }
 
-export async function wakeInstance(instanceId: string): Promise<{ ok: boolean }> {
-  const res = await fetch(`/api/instances/${encodeURIComponent(instanceId)}/wake`, { method: 'POST' });
-  return res.json();
-}
-
-export async function fetchAnalytics(days = 30, dateFrom?: string, dateTo?: string) {
+export async function fetchAnalytics(days = 30, dateFrom?: string, dateTo?: string, instanceId?: string) {
   const qs = new URLSearchParams();
   if (dateFrom) qs.set('from', dateFrom);
   if (dateTo) qs.set('to', dateTo);
   if (!dateFrom && !dateTo) qs.set('days', String(days));
+  if (instanceId) qs.set('instance_id', instanceId);
   return (await fetch(`/api/analytics?${qs}`)).json();
 }

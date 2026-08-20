@@ -61,6 +61,12 @@ class TestInstanceConfigFromYaml:
         assert ic.source == "jira"
         assert ic.envs is None
         assert ic.claude_md_strategy == "ignore"
+        assert ic.idle_cycle_limit == 0
+
+    def test_idle_cycle_limit(self, agent_dir):
+        (agent_dir / "instance.yaml").write_text(yaml.dump({"workflow": "jira-sprint", "idle_cycle_limit": 10}))
+        ic = InstanceConfig.from_yaml(agent_dir / "instance.yaml")
+        assert ic.idle_cycle_limit == 10
 
     def test_empty_envs(self, agent_dir):
         (agent_dir / "instance.yaml").write_text(yaml.dump({"workflow": "jira-sprint", "envs": []}))
@@ -180,8 +186,7 @@ class TestValidateInstanceConfig:
 
         ic = InstanceConfig(envs=None)
         env = {"PLAYWRIGHT_BROWSERS_PATH": "/opt/pw", "SLACK_WEBHOOK_URL": "https://hooks.slack.com/x"}
-        with caplog.at_level(logging.INFO):
-            with patch.dict(os.environ, env, clear=False):
-                validate_instance_config(preset_tree, ic)
+        with caplog.at_level(logging.INFO), patch.dict(os.environ, env, clear=False):
+            validate_instance_config(preset_tree, ic)
         assert "browser" in caplog.text
         assert "container-scan" in caplog.text

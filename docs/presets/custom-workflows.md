@@ -45,9 +45,13 @@ workflows/my-workflow/
 
 This is the core of your workflow. At startup, the runner assembles the final `CLAUDE.md` by combining:
 
-1. **Core instructions** (`presets/core/CLAUDE.md`) — security rules, tool usage, general behavior
-2. **Workflow instructions** (your workflow's `CLAUDE.md`) — what to do each cycle
-3. **Instance instructions** (your config repo's `agent/CLAUDE.md`) — instance-specific overrides (strategy-dependent)
+1. **Core instructions** (`presets/core/CLAUDE.md`) — security rules, memory, output mode
+2. **Instance-shared** (config repo `shared/agent/CLAUDE.md`, if present)
+3. **`claude_includes`** from the workflow manifest (paths relative to `presets/`; missing file is fatal)
+4. **Workflow overlay** (your workflow's `CLAUDE.md`) — cycle-specific deltas
+5. **Instance instructions** (config repo `agent/CLAUDE.md`) — strategy-dependent
+
+Jira kanban and sprint share `presets/shared/claude/jira-loop.md` via `claude_includes`. Their workflow CLAUDE.md files are thin overlays (candidate source + claim notes). Onboarding has no includes.
 
 Your workflow CLAUDE.md should be written as imperative instructions telling the bot what to do. Think of it as a runbook.
 
@@ -81,6 +85,10 @@ shared_skills:
   - post-pr            # Post-PR Jira comment + Slack notification
   - auto-fork          # Fork creation for new repos
 
+# Shared instruction fragments (paths relative to presets/). Missing = fatal.
+claude_includes:
+  - shared/claude/jira-loop.md
+
 # What this workflow provides
 provides:
   claude_md: CLAUDE.md
@@ -108,6 +116,7 @@ requires:
 | `description` | Yes | One-line summary |
 | `preflight` | No | List of preflight script filenames (documentation only) |
 | `shared_skills` | No | Core skill names to include (from `presets/shared/skills/`) |
+| `claude_includes` | No | Markdown fragments under `presets/` to insert after instance-shared, before the workflow overlay. Missing file is fatal. |
 | `provides.claude_md` | No | CLAUDE.md filename (always `CLAUDE.md`) |
 | `provides.skills` | No | Skill directory names provided by this workflow |
 | `requires.mcp_servers` | No | MCP servers that must be configured. Fatal if missing. |
@@ -164,7 +173,7 @@ The `claude_md.strategy` field controls how your instance's `agent/CLAUDE.md` co
 ### `ignore` (default)
 
 ```
-Final CLAUDE.md = core + workflow
+Final CLAUDE.md = core + instance-shared + claude_includes + workflow overlay
 ```
 
 Instance `CLAUDE.md` is ignored. Use when the workflow's instructions are complete and the instance doesn't need to add anything.
@@ -174,7 +183,7 @@ Instance `CLAUDE.md` is ignored. Use when the workflow's instructions are comple
 ### `append`
 
 ```
-Final CLAUDE.md = core + workflow + instance
+Final CLAUDE.md = core + instance-shared + claude_includes + workflow overlay + instance
 ```
 
 Instance `CLAUDE.md` is appended after the workflow instructions. Use when you want to add instance-specific context on top of the workflow.
@@ -199,10 +208,10 @@ claude_md:
 ### `replace`
 
 ```
-Final CLAUDE.md = core + instance
+Final CLAUDE.md = core + instance-shared + instance
 ```
 
-The workflow's CLAUDE.md is skipped entirely. Instance CLAUDE.md replaces it. Use when you want complete control over the bot's instructions while still keeping core security rules.
+The workflow's CLAUDE.md **and** `claude_includes` are skipped. Instance CLAUDE.md replaces them. Use when you want complete control over the bot's instructions while still keeping core security rules.
 
 **When to use**: Rarely. Only when the workflow is just a container for preflight/skills and the instructions are fully custom per instance.
 

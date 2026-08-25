@@ -139,12 +139,9 @@ volumes:
   pgdata:
     name: memory-server_pgdata
     external: true
+  # Named volume, not tmpfs: Fedora SELinux denies sock_file create on tmpfs_t
+  # (container_t → tmpfs_t), which kills executor-server and leaves bot Created.
   executor-sock:
-    driver: local
-    driver_opts:
-      type: tmpfs
-      device: tmpfs
-      o: size=1m
 
 networks:
   internal:

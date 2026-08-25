@@ -170,46 +170,22 @@ Update metadata: `phase: 2`, `step: "konflux-info"`.
 
 Parse Konflux responses, then generate and submit the Konflux MR:
 
-1. **Clone the existing fork** — do NOT attempt to fork the repo; the fork already exists. Look up `konflux-release-data` in `project-repos.json` for the fork and upstream URLs:
-   ```bash
-   git clone <project-repos.json url> /tmp/konflux-release-data
-   cd /tmp/konflux-release-data
-   git remote add upstream <project-repos.json upstream>
-   git fetch upstream main
-   git checkout -b bot/onboarding-<TICKET_KEY> upstream/main
-   ```
+1. Read `presets/workflows/onboarding/OPEN-MR.md`. Repo key `konflux-release-data`. Then `/generate-konflux` targeting `/tmp/konflux-release-data`.
 
-2. **Generate files**: Run `/generate-konflux` targeting `/tmp/konflux-release-data`.
-
-3. **Build auto-generated output**: Run `build-single.sh` to regenerate the `auto-generated/` directory:
+2. **Build auto-generated output**: Run `build-single.sh` to regenerate the `auto-generated/` directory:
    ```bash
    cd /tmp/konflux-release-data/tenants-config
    ./build-single.sh <tenant>
    ```
    The script accepts the tenant name with or without the `-tenant` suffix. This runs `kustomize build` on the tenant directory and produces the `auto-generated/` files that CI requires.
 
-4. **Verify scope**: Confirm `auto-generated/` changes are scoped to the target tenant only:
+3. **Verify scope**: Confirm `auto-generated/` changes are scoped to the target tenant only:
    ```bash
    git diff --name-only -- tenants-config/auto-generated/ | grep -v "tenants/<tenant>"
    ```
    If any auto-generated files for other tenants appear, discard them with `git checkout` before committing.
 
-5. **Commit**: Stage and commit both the source files (tenant YAML, RPA, constraints, CODEOWNERS) and the scoped `auto-generated/` output.
-
-6. **Push and open MR** — do NOT use `glab mr create` (doesn't work for cross-fork MRs). Use the API:
-   ```bash
-   git push origin bot/onboarding-<TICKET_KEY>
-   glab api projects/releng%2Fkonflux-release-data/merge_requests -X POST \
-     -f source_branch="bot/onboarding-<TICKET_KEY>" \
-     -f target_branch="main" \
-     -f title="Add Konflux config for <instance_name>" \
-     -f description="$(cat <<'EOF'
-   Onboarding: adds Application, Component, ImageRepository, ReleasePlan, IntegrationTestScenario, and ReleasePlanAdmission for <instance_name>.
-   EOF
-   )" \
-     --hostname gitlab.cee.redhat.com
-   ```
-   Parse the MR number and URL from the JSON response.
+4. Commit source files (tenant YAML, RPA, constraints, CODEOWNERS) + scoped `auto-generated/` output, then finish OPEN-MR.md (push + `glab api` MR).
 
 Post MR link. Link MR to Jira: `jira_create_remote_issue_link` on both the parent ticket and the Phase 2 sub-ticket. Apply `onboarding:konflux-mr`. Transition Phase 2 sub-ticket to "In Progress" (team needs to merge MR). Store Konflux info in metadata.
 
@@ -279,33 +255,7 @@ Wait for: pipelines merged, build ran, Quay image exists.
    team in JIRA or Slack and we'll help get one set up.
    ```
    If the team doesn't have an app-interface role, apply `onboarding:blocked`.
-3. **Clone the existing app-interface fork** — do NOT attempt to fork; the fork already exists. Look up `app-interface` in `project-repos.json` for the fork and upstream URLs:
-   ```bash
-   git clone <project-repos.json url> /tmp/app-interface
-   cd /tmp/app-interface
-   git remote add upstream <project-repos.json upstream>
-   git fetch upstream master
-   git checkout -b bot/onboarding-<TICKET_KEY> upstream/master
-   ```
-
-4. **Discover and generate**: Discover infrastructure values at generation time, then run `/generate-app-interface` targeting `/tmp/app-interface`.
-
-5. **Commit**: Stage and commit all generated files.
-
-6. **Push and open MR** — do NOT use `glab mr create` (doesn't work for cross-fork MRs). Use the API:
-   ```bash
-   git push origin bot/onboarding-<TICKET_KEY>
-   glab api projects/service%2Fapp-interface/merge_requests -X POST \
-     -f source_branch="bot/onboarding-<TICKET_KEY>" \
-     -f target_branch="master" \
-     -f title="[Phase 3/3] Add <instance_name> deployment (<TICKET_KEY>)" \
-     -f description="$(cat <<'EOF'
-   Onboarding: adds SaaS deploy file, codeComponents entry, and self-service datafile for <instance_name>.
-   EOF
-   )" \
-     --hostname gitlab.cee.redhat.com
-   ```
-   Parse the MR number and URL from the JSON response.
+3. Read `presets/workflows/onboarding/OPEN-MR.md`. Repo key `app-interface`. Discover infrastructure values at generation time, then `/generate-app-interface` targeting `/tmp/app-interface`. Commit generated files, then finish OPEN-MR.md (push + `glab api` MR).
 
    The MR includes:
    - The deploy file (`<instance_name>-deploy.yml`)
@@ -424,36 +374,7 @@ Epic's `onboarding:*` label = authoritative step indicator. Bot applies one labe
 
 ## Canonical Field Names
 
-All skills MUST use these field names. No aliases.
-
-| Canonical | Used in | Meaning |
-|-----------|---------|---------|
-| `instance_name` | all skills | Repo name and Konflux app/component name (e.g., `hcc-framework-agent-dev`) |
-| `instance_id` | generate-app-interface | Human-readable bot identity (`BOT_INSTANCE_ID`), set in deploy template |
-| `repo_url` | generate-konflux, generate-app-interface, detect-tech-stack | Full HTTPS URL of instance repo |
-| `target_branch` | generate-konflux, generate-app-interface, detect-tech-stack | Default branch of instance repo (`main` or `master`) |
-| `envs` | detect-tech-stack, generate-instance, post-plan | Runtime environments needed (`node`, `browser`, etc.) |
-| `personas` | detect-tech-stack, generate-instance, post-plan | Detected personas from repo analysis |
-| `epic_key` | all Jira-posting skills | Jira epic key (e.g., `RHCLOUD-12345`) |
-| `quay_org` | generate-konflux, generate-app-interface, post-konflux-instructions | Quay org for image push |
-| `tenant` | generate-konflux | Konflux tenant namespace name |
-| `config_name` | generate-instance, generate-app-interface | Config directory name under `instance/` |
-| `config_repo` | generate-app-interface | Repo URL for `BOT_CONFIG_PATH` source (defaults to `repo_url`) |
-| `config_path` | generate-app-interface | Path within config_repo to config dir |
-| `pattern` | generate-app-interface | SaaS file pattern: `shared` or `separate` |
-| `gcp_project_id` | generate-app-interface | GCP project for Vertex AI |
-| `gcp_region` | generate-app-interface | GCP region (default: `global`) |
-| `bot_name` | generate-instance, generate-app-interface | OpenShift deployment name |
-| `bot_label` | generate-instance, generate-app-interface, post-manual-steps | Jira label the bot filters on |
-| `board_name` | generate-app-interface | Jira board name or ID (`BOT_BOARD_NAME`). Required for jira-sprint and jira-kanban workflows. |
-| `dedicated_proxy` | post-plan, post-manual-steps | Whether team needs own proxy (dedicated infra) |
-| `service_tree` | generate-app-interface | Path under `data/services/` for separate pattern (e.g., `my-platform/my-team`). Required for `separate`, not used for `shared`. |
-| `app_ref` | generate-app-interface | `$ref` to app.yml (default: shared service tree). Override for separate pattern. |
-| `namespace_ref` | generate-app-interface | `$ref` to namespace YAML. Discovered from shared deploy.yml if not provided. |
-| `pipelines_ref` | generate-app-interface | `$ref` to pipeline provider. Override for separate pattern. |
-| `team_role_ref` | generate-app-interface | App-interface role file path for self-service deploy access (e.g., `teams/insights/roles/platform-experience-services`). The bot adds a `saas-file-self-service` datafile entry for the new deploy file. |
-
-**Retired aliases** (do NOT use): `source_url`, `default_branch`, `app_name`, `component_name`, `suggested_envs`, `suggested_personas`, `instance_repo_url`.
+Canonical names live in each generate/post skill `SKILL.md`. Never use retired aliases: `source_url`, `default_branch`, `app_name`, `component_name`, `suggested_envs`, `suggested_personas`, `instance_repo_url`.
 
 ## Rules
 
@@ -468,34 +389,4 @@ All skills MUST use these field names. No aliases.
 - Use runtime env vars: `GH_USER_NAME`, `BOT_JIRA_EMAIL`, `BOT_CONFIG_PATH`
 - No emojis in Jira comments or PR/MR descriptions — keep tone professional and plain
 - Never use `--depth 1` when cloning repos you need to push to — shallow clones cannot push to a remote
-
----
-
-## Known Limitations / V2
-
-Things the onboarding workflow cannot yet handle for dedicated-infra teams (outside shared infrastructure). If a team hits one of these, coordinate manually with the Rehor platform team.
-
-### Dedicated proxy deployment
-
-`deploy-template.yaml.j2` hardcodes ~15 service references to shared infrastructure: `devbot-proxy` (ports 3128, 8443, 8444, 8446, 9090), `devbot-memory-server` (port 8080), and `devbot-secrets`. These are string literals in the Jinja2 template, not OpenShift template parameters. A team needing separate credentials (different Jira/GitHub/GitLab accounts) requires a dedicated proxy, which means either:
-- Parameterizing the deploy template to accept proxy/memory-server/secret names
-- Creating a separate deploy template variant for dedicated-proxy deployments
-
-The NetworkPolicy also hardcodes pod label selectors for `devbot-proxy` and `memory-server`.
-
-### Arbitrary GitLab hosts
-
-`generate_instance.py` hardcodes `gitlab.cee.redhat.com` for GitLab fork URL construction. Teams using a different GitLab instance (e.g., `gitlab.com`) would get wrong fork URLs in `project-repos.json`, causing git-clone failures at runtime.
-
-### Separate namespace / app-interface service
-
-The `separate` SaaS pattern requires `service_tree` and supports `app_ref`, `namespace_ref`, `pipelines_ref` overrides. However, it cannot bootstrap the service tree itself. For a team that needs their own namespace on a different cluster, the following must be created manually (with app-sre):
-- A new `app.yml` in app-interface
-- A new namespace YAML under the team's service tree
-- A new pipeline provider definition
-
-**`namespace_ref` fallback risk**: if `namespace_ref` is not explicitly provided, the generator falls back to discovering it from the shared `deploy.yml`. For a team on a different cluster/namespace, this fallback gives the wrong namespace. Always require `namespace_ref` for separate pattern teams on their own namespace — do not rely on the fallback.
-
-### Arbitrary Konflux clusters
-
-`generate_konflux.py` discovers cluster FQDN suffixes at runtime from the `config/` directory in the cloned `konflux-release-data` repo. A cluster that doesn't have an existing `config/<cluster>.*` directory will raise a `ValueError` with the list of available clusters.
+- Dedicated-infra / blocked? Read `presets/workflows/onboarding/LIMITATIONS.md` before posting.

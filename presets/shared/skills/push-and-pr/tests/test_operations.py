@@ -433,14 +433,22 @@ class TestCreatePR:
     """Test create_pr operation."""
 
     def test_create_github_pr_fork(self, operations):
-        """Test creating GitHub PR for fork."""
+        """Test creating GitHub PR for fork via gh api."""
         operations.repo_config = RepositoryConfig(
             repo_type="github", is_fork=True, upstream="org/repo", fork="user/repo"
         )
         operations.current_branch = "feature"
 
         with patch.object(operations, "_run_command") as mock_run:
-            mock_run.return_value = CompletedProcess([], 0, stdout="https://github.com/org/repo/pull/123\n", stderr="")
+            mock_run.side_effect = [
+                CompletedProcess([], 0, stdout="main\n", stderr=""),
+                CompletedProcess(
+                    [],
+                    0,
+                    stdout='{"html_url":"https://github.com/org/repo/pull/123","number":123}\n',
+                    stderr="",
+                ),
+            ]
 
             result = operations.create_pr()
 
@@ -450,36 +458,56 @@ class TestCreatePR:
         assert operations.pr_url == "https://github.com/org/repo/pull/123"
         assert operations.pr_number == "123"
 
-        expected_cmd = [
+        assert mock_run.call_count == 2
+        assert mock_run.call_args_list[0][0][0] == [
             "gh",
-            "pr",
-            "create",
-            "--repo",
-            "org/repo",
-            "--head",
-            "user:feature",
-            "--title",
-            "Test PR",
-            "--body",
-            "Test description",
+            "api",
+            "repos/org/repo",
+            "--jq",
+            ".default_branch",
         ]
-        mock_run.assert_called_once_with(expected_cmd, check=False)
+        post_cmd = mock_run.call_args_list[1][0][0]
+        assert post_cmd == ["gh", "api", "--method", "POST", "repos/org/repo/pulls", "--input", "-"]
+        payload = json.loads(mock_run.call_args_list[1][1]["input_text"])
+        assert payload == {
+            "title": "Test PR",
+            "body": "Test description",
+            "head": "user:feature",
+            "base": "main",
+        }
 
     def test_create_github_pr_direct(self, operations):
-        """Test creating GitHub PR for direct push."""
-        operations.repo_config = RepositoryConfig(repo_type="github", is_fork=False)
+        """Test creating GitHub PR for direct push via gh api."""
+        operations.repo_config = RepositoryConfig(repo_type="github", is_fork=False, origin="org/repo")
         operations.current_branch = "main"
 
         with patch.object(operations, "_run_command") as mock_run:
-            mock_run.return_value = CompletedProcess([], 0, stdout="https://github.com/org/repo/pull/456\n", stderr="")
+            mock_run.side_effect = [
+                CompletedProcess([], 0, stdout="develop\n", stderr=""),
+                CompletedProcess(
+                    [],
+                    0,
+                    stdout='{"html_url":"https://github.com/org/repo/pull/456","number":456}\n',
+                    stderr="",
+                ),
+            ]
 
             result = operations.create_pr()
 
         assert result.success is True
         assert result.data["pr_number"] == "456"
-
-        expected_cmd = ["gh", "pr", "create", "--title", "Test PR", "--body", "Test description"]
-        mock_run.assert_called_once_with(expected_cmd, check=False)
+        payload = json.loads(mock_run.call_args_list[1][1]["input_text"])
+        assert payload["head"] == "main"
+        assert payload["base"] == "develop"
+        assert mock_run.call_args_list[1][0][0] == [
+            "gh",
+            "api",
+            "--method",
+            "POST",
+            "repos/org/repo/pulls",
+            "--input",
+            "-",
+        ]
 
     def test_create_gitlab_mr(self, operations):
         """Test creating GitLab MR."""
@@ -511,7 +539,7 @@ class TestCreatePR:
 
     def test_create_pr_error(self, operations):
         """Test creating PR with error."""
-        operations.repo_config = RepositoryConfig(repo_type="github", is_fork=False)
+        operations.repo_config = RepositoryConfig(repo_type="github", is_fork=False, origin="org/repo")
         operations.current_branch = "feature"
 
         with patch.object(operations, "_run_command") as mock_run:
@@ -520,7 +548,7 @@ class TestCreatePR:
             result = operations.create_pr()
 
         assert result.success is False
-        assert "gh pr create failed" in result.message
+        assert "gh api failed" in result.message
         assert "PR already exists" in result.message
 
     def test_create_pr_no_config(self, operations):
@@ -644,16 +672,24 @@ class TestDryRun:
 
     def test_dry_run_create_pr(self, dry_run_operations):
         """Test create_pr in dry-run mode."""
-        dry_run_operations.repo_config = RepositoryConfig(repo_type="github", is_fork=False)
+        dry_run_operations.repo_config = RepositoryConfig(repo_type="github", is_fork=False, origin="org/repo")
         dry_run_operations.current_branch = "feature"
 
         with patch.object(dry_run_operations, "_run_command") as mock_run:
-            mock_run.return_value = CompletedProcess([], 0, stdout="", stderr="")
+            mock_run.side_effect = [
+                CompletedProcess([], 0, stdout="main\n", stderr=""),
+                CompletedProcess(
+                    [],
+                    0,
+                    stdout='{"html_url":"https://github.com/org/repo/pull/1","number":1}',
+                    stderr="",
+                ),
+            ]
 
             result = dry_run_operations.create_pr()
 
         assert result.success is True
-        mock_run.assert_called_once()
+        assert mock_run.call_count == 2
 
 
 class TestFindPRTemplate:

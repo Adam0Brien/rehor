@@ -30,6 +30,7 @@ class RepositoryConfig:
     is_fork: bool
     upstream: str | None = None  # e.g., "RedHatInsights/hcc-ai-assistant"
     fork: str | None = None  # e.g., "catastrophe-brandon/hcc-ai-assistant"
+    origin: str | None = None  # owner/repo of origin (PR target when not a fork)
     upstream_url: str | None = None
     fork_url: str | None = None
 
@@ -57,15 +58,25 @@ class PushAndPROperations:
         self.pr_number: str | None = None
 
     def _run_command(
-        self, cmd: list[str], capture_output: bool = True, check: bool = True
+        self,
+        cmd: list[str],
+        capture_output: bool = True,
+        check: bool = True,
+        input_text: str | None = None,
     ) -> subprocess.CompletedProcess:
         """Run a shell command with optional dry-run mode."""
         if self.dry_run:
             print(f"[DRY RUN] Would execute: {' '.join(cmd)}")
-            return subprocess.CompletedProcess(cmd, 0, stdout=b"", stderr=b"")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
-        result = subprocess.run(cmd, capture_output=capture_output, text=True, check=check, cwd=self.cwd)
-        return result
+        return subprocess.run(
+            cmd,
+            capture_output=capture_output,
+            text=True,
+            check=check,
+            cwd=self.cwd,
+            input=input_text,
+        )
 
     def detect_repository(self) -> OperationResult:
         """
@@ -125,8 +136,15 @@ class PushAndPROperations:
             repo_type = repo_config.get("type", "github")
             upstream = repo_config.get("upstream")
             fork = repo_config.get("fork")
+            origin_raw = fork or repo_config.get("url") or upstream
 
-            self.repo_config = RepositoryConfig(repo_type=repo_type, is_fork=bool(fork), upstream=upstream, fork=fork)
+            self.repo_config = RepositoryConfig(
+                repo_type=repo_type,
+                is_fork=bool(fork),
+                upstream=upstream,
+                fork=fork,
+                origin=self._normalize_owner_repo(origin_raw) if origin_raw else None,
+            )
 
             return OperationResult(
                 True,
@@ -183,6 +201,7 @@ class PushAndPROperations:
                 is_fork=is_fork,
                 upstream=upstream_owner_repo,
                 fork=origin_owner_repo if is_fork else None,
+                origin=origin_owner_repo,
                 upstream_url=upstream_url,
                 fork_url=origin_url if is_fork else None,
             )
@@ -222,6 +241,13 @@ class PushAndPROperations:
                 return owner_repo
 
         return url  # Fallback to original URL
+
+    def _normalize_owner_repo(self, value: str) -> str:
+        """Turn a git URL or owner/repo string into owner/repo."""
+        value = value.strip()
+        if "://" in value or value.startswith("git@"):
+            return self._extract_owner_repo(value)
+        return value.removesuffix(".git")
 
     @staticmethod
     def find_pr_template(repo_dir: Path | None = None) -> OperationResult:
@@ -367,8 +393,9 @@ class PushAndPROperations:
         """
         Create pull/merge request with correct flags.
 
-        Uses gh pr create for GitHub or glab mr create for GitLab.
-        Handles fork scenario with --head flag (GitHub) or proper remote (GitLab).
+        GitHub uses `gh api POST /repos/{owner}/{repo}/pulls` (thin client cannot
+        run `gh pr create` without git). GitLab still uses `glab mr create`.
+        Handles fork scenario with head = owner:branch against upstream.
 
         Returns:
             OperationResult with pr_url and pr_number
@@ -392,52 +419,78 @@ class PushAndPROperations:
         except Exception as e:
             return OperationResult(False, f"create_pr failed: {e!s}")
 
+    def _github_repo_for_pr(self) -> str | None:
+        """Owner/repo to open the PR against."""
+        cfg = self.repo_config
+        if cfg is None:
+            return None
+        if cfg.is_fork:
+            if not cfg.upstream:
+                return None
+            return self._normalize_owner_repo(cfg.upstream)
+        for candidate in (cfg.origin, cfg.upstream, cfg.fork):
+            if candidate:
+                return self._normalize_owner_repo(candidate)
+        result = self._run_command(["git", "remote", "get-url", "origin"], check=False)
+        if result.returncode == 0 and (result.stdout or "").strip():
+            return self._extract_owner_repo(result.stdout.strip())
+        return None
+
+    def _github_default_branch(self, owner_repo: str) -> str:
+        """Default branch via gh api (no git required). Falls back to main."""
+        result = self._run_command(
+            ["gh", "api", f"repos/{owner_repo}", "--jq", ".default_branch"],
+            check=False,
+        )
+        branch = (result.stdout or "").strip()
+        if result.returncode == 0 and branch:
+            return branch
+        return "main"
+
     def _create_github_pr(self) -> OperationResult:
-        """Create GitHub PR with gh pr create."""
+        """Create GitHub PR via gh api POST /repos/{owner}/{repo}/pulls."""
+        if self.repo_config is None:
+            return OperationResult(False, "Repository configuration not detected. Run detect_repository first.")
+
+        if self.repo_config.is_fork and (not self.repo_config.upstream or not self.repo_config.fork):
+            return OperationResult(False, "Upstream and fork repositories required for fork workflow")
+
+        owner_repo = self._github_repo_for_pr()
+        if not owner_repo:
+            return OperationResult(False, "Could not determine GitHub owner/repo for PR")
+
         if self.repo_config.is_fork:
-            # gh pr create --repo <upstream> --head <fork>:<branch> --title <title> --body <body>
-            if not self.repo_config.upstream or not self.repo_config.fork:
-                return OperationResult(False, "Upstream and fork repositories required for fork workflow")
-
-            cmd = [
-                "gh",
-                "pr",
-                "create",
-                "--repo",
-                self.repo_config.upstream,
-                "--head",
-                f"{self.repo_config.fork.split('/')[0]}:{self.current_branch}",
-                "--title",
-                self.title,
-                "--body",
-                self.body,
-            ]
+            fork_owner = self._normalize_owner_repo(self.repo_config.fork).split("/")[0]
+            head = f"{fork_owner}:{self.current_branch}"
         else:
-            # gh pr create --title <title> --body <body>
-            cmd = ["gh", "pr", "create", "--title", self.title, "--body", self.body]
+            head = self.current_branch
 
-        result = self._run_command(cmd, check=False)
+        base = self._github_default_branch(owner_repo)
+        payload = {"title": self.title, "body": self.body, "head": head, "base": base}
+        cmd = ["gh", "api", "--method", "POST", f"repos/{owner_repo}/pulls", "--input", "-"]
+        result = self._run_command(cmd, check=False, input_text=json.dumps(payload))
 
         if result.returncode != 0:
             stderr = result.stderr if result.stderr else ""
-            return OperationResult(False, f"gh pr create failed: {stderr}")
+            return OperationResult(False, f"gh api failed: {stderr}")
 
-        # Parse PR URL from stdout
         stdout = result.stdout if result.stdout else ""
-        pr_url = stdout.strip().split("\n")[-1] if stdout else None
+        try:
+            data = json.loads(stdout) if stdout.strip() else {}
+        except json.JSONDecodeError:
+            return OperationResult(False, f"gh api failed: invalid JSON: {stdout[:200]}")
 
-        # Extract PR number from URL
-        pr_number = None
-        if pr_url and "/pull/" in pr_url:
-            pr_number = pr_url.split("/pull/")[-1]
+        pr_url = data.get("html_url")
+        pr_number = data.get("number")
+        pr_number_str = str(pr_number) if pr_number is not None else None
 
         self.pr_url = pr_url
-        self.pr_number = pr_number
+        self.pr_number = pr_number_str
 
         return OperationResult(
             True,
-            f"Created PR #{pr_number}" if pr_number else "Created PR",
-            data={"pr_url": pr_url, "pr_number": pr_number},
+            f"Created PR #{pr_number_str}" if pr_number_str else "Created PR",
+            data={"pr_url": pr_url, "pr_number": pr_number_str},
         )
 
     def _create_gitlab_mr(self) -> OperationResult:

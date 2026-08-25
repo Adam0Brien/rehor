@@ -12,6 +12,9 @@ shared_skills:
   - post-pr
   - auto-fork
 
+claude_includes:
+  - shared/claude/jira-loop.md
+
 provides:
   claude_md: CLAUDE.md
   skills:

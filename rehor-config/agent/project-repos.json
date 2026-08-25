@@ -176,5 +176,9 @@
   "scalprum/scaffolding": {
     "url": "https://github.com/platex-rehor-bot/scaffolding.git",
     "upstream": "https://github.com/scalprum/scaffolding.git"
+  },
+  "token-cost-bench": {
+    "url": "https://github.com/Adam0Brien/token-cost-bench.git",
+    "upstream": "https://github.com/Adam0Brien/token-cost-bench.git"
   }
 }

@@ -52,21 +52,36 @@ class TestGitHubForkWorkflow:
             CompletedProcess([], 0, stdout="Synced successfully\n", stderr=""),
             # push_branch: git push
             CompletedProcess([], 0, stdout="Pushed to origin\n", stderr=""),
-            # create_pr: gh pr create
-            CompletedProcess([], 0, stdout="https://github.com/RedHatInsights/test-repo/pull/123\n", stderr=""),
+            # create_pr: default branch + gh api POST /pulls
+            CompletedProcess([], 0, stdout="master\n", stderr=""),
+            CompletedProcess(
+                [],
+                0,
+                stdout='{"html_url":"https://github.com/RedHatInsights/test-repo/pull/123","number":123}\n',
+                stderr="",
+            ),
         ]
 
         exit_code = execute_push_and_pr_workflow(title="Test PR", body="Test description", dry_run=False)
 
         assert exit_code == 0
-        assert mock_run.call_count == 4
+        assert mock_run.call_count == 5
 
         # Verify command sequence
         calls = mock_run.call_args_list
         assert calls[0][0][0] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]
         assert calls[1][0][0] == ["gh", "repo", "sync", "catastrophe-brandon/test-repo"]
         assert calls[2][0][0][0:3] == ["git", "-c", "credential.helper=!gh auth git-credential"]
-        assert calls[3][0][0][0:2] == ["gh", "pr"]
+        assert calls[3][0][0][:2] == ["gh", "api"]
+        assert calls[4][0][0] == [
+            "gh",
+            "api",
+            "--method",
+            "POST",
+            "repos/RedHatInsights/test-repo/pulls",
+            "--input",
+            "-",
+        ]
 
     @patch("scripts.push_and_pr_operations.Path.cwd")
     @patch("scripts.push_and_pr_operations.PushAndPROperations._run_command")
@@ -78,7 +93,13 @@ class TestGitHubForkWorkflow:
             CompletedProcess([], 0, stdout="feature\n", stderr=""),
             CompletedProcess([], 1, stdout="", stderr="already up-to-date"),  # sync already done
             CompletedProcess([], 0, stdout="", stderr="Everything up-to-date"),  # push already done
-            CompletedProcess([], 0, stdout="https://github.com/RedHatInsights/test-repo/pull/456\n", stderr=""),
+            CompletedProcess([], 0, stdout="main\n", stderr=""),
+            CompletedProcess(
+                [],
+                0,
+                stdout='{"html_url":"https://github.com/RedHatInsights/test-repo/pull/456","number":456}\n',
+                stderr="",
+            ),
         ]
 
         exit_code = execute_push_and_pr_workflow(title="Update docs", body="Minor update", dry_run=False)
@@ -95,7 +116,13 @@ class TestGitHubForkWorkflow:
             CompletedProcess([], 0, stdout="fix-bug\n", stderr=""),
             CompletedProcess([], 0, stdout="Synced\n", stderr=""),
             CompletedProcess([], 0, stdout="Pushed\n", stderr=""),
-            CompletedProcess([], 0, stdout="https://github.com/RedHatInsights/test-repo/pull/789\n", stderr=""),
+            CompletedProcess([], 0, stdout="main\n", stderr=""),
+            CompletedProcess(
+                [],
+                0,
+                stdout='{"html_url":"https://github.com/RedHatInsights/test-repo/pull/789","number":789}\n',
+                stderr="",
+            ),
         ]
 
         title = 'Fix "quoted" issue & <tags>'
@@ -105,10 +132,9 @@ class TestGitHubForkWorkflow:
 
         assert exit_code == 0
 
-        # Verify title and body were passed to gh pr create
-        pr_create_call = mock_run.call_args_list[3]
-        assert title in pr_create_call[0][0]
-        assert body in pr_create_call[0][0]
+        payload = json.loads(mock_run.call_args_list[4][1]["input_text"])
+        assert payload["title"] == title
+        assert payload["body"] == body
 
 
 class TestGitHubDirectWorkflow:
@@ -131,23 +157,35 @@ class TestGitHubDirectWorkflow:
             # sync_fork: skipped (not a fork)
             # push_branch: git push
             CompletedProcess([], 0, stdout="Pushed\n", stderr=""),
-            # create_pr: gh pr create (direct)
-            CompletedProcess([], 0, stdout="https://github.com/RedHatInsights/test-repo/pull/100\n", stderr=""),
+            # create_pr: default branch + gh api POST /pulls
+            CompletedProcess([], 0, stdout="main\n", stderr=""),
+            CompletedProcess(
+                [],
+                0,
+                stdout='{"html_url":"https://github.com/RedHatInsights/test-repo/pull/100","number":100}\n',
+                stderr="",
+            ),
         ]
 
         exit_code = execute_push_and_pr_workflow(title="Direct PR", body="Direct push", dry_run=False)
 
         assert exit_code == 0
-        assert mock_run.call_count == 4
+        assert mock_run.call_count == 5
 
-        # Verify gh pr create for direct push (no --repo, no --head)
-        pr_create_call = mock_run.call_args_list[3]
+        pr_create_call = mock_run.call_args_list[4]
         cmd = pr_create_call[0][0]
-        assert cmd[0:2] == ["gh", "pr"]
-        assert "--repo" not in cmd
-        assert "--head" not in cmd
-        assert "--title" in cmd
-        assert "--body" in cmd
+        assert cmd == [
+            "gh",
+            "api",
+            "--method",
+            "POST",
+            "repos/RedHatInsights/test-repo/pulls",
+            "--input",
+            "-",
+        ]
+        payload = json.loads(pr_create_call[1]["input_text"])
+        assert payload["head"] == "main"
+        assert payload["title"] == "Direct PR"
 
     @patch("scripts.push_and_pr_operations.PushAndPROperations._run_command")
     def test_github_direct_workflow_ssh_url(self, mock_run):
@@ -160,7 +198,13 @@ class TestGitHubDirectWorkflow:
             CompletedProcess([], 0, stdout="develop\n", stderr=""),
             CompletedProcess([], 0, stdout=remote_output, stderr=""),
             CompletedProcess([], 0, stdout="Pushed\n", stderr=""),
-            CompletedProcess([], 0, stdout="https://github.com/org/project/pull/42\n", stderr=""),
+            CompletedProcess([], 0, stdout="main\n", stderr=""),
+            CompletedProcess(
+                [],
+                0,
+                stdout='{"html_url":"https://github.com/org/project/pull/42","number":42}\n',
+                stderr="",
+            ),
         ]
 
         exit_code = execute_push_and_pr_workflow(title="SSH test", body="Testing SSH URL", dry_run=False)
@@ -302,14 +346,15 @@ class TestWorkflowErrorHandling:
             CompletedProcess([], 0, stdout="feature\n", stderr=""),
             CompletedProcess([], 0, stdout=remote_output, stderr=""),
             CompletedProcess([], 0, stdout="Pushed\n", stderr=""),
-            # create_pr: failed
+            CompletedProcess([], 0, stdout="main\n", stderr=""),
+            # create_pr POST: failed
             CompletedProcess([], 1, stdout="", stderr="pull request already exists"),
         ]
 
         exit_code = execute_push_and_pr_workflow(title="Test", body="Test", dry_run=False)
 
         assert exit_code == 1
-        assert mock_run.call_count == 4  # All operations attempted, last one failed
+        assert mock_run.call_count == 5  # All operations attempted, last one failed
 
     @patch("scripts.push_and_pr_operations.PushAndPROperations._run_command")
     def test_workflow_fails_on_unsupported_remote(self, mock_run):
@@ -355,9 +400,19 @@ class TestDryRunWorkflow:
         with open(config_file, "w") as f:
             json.dump(config_data, f)
 
-        # In dry-run mode, _run_command returns empty responses except for branch detection
-        # First call is for branch detection, needs to return a branch name
-        mock_run.return_value = CompletedProcess([], 0, stdout="main\n", stderr="")
+        # Branch detect, sync, push, default_branch, then gh api POST JSON
+        mock_run.side_effect = [
+            CompletedProcess([], 0, stdout="main\n", stderr=""),
+            CompletedProcess([], 0, stdout="", stderr=""),
+            CompletedProcess([], 0, stdout="", stderr=""),
+            CompletedProcess([], 0, stdout="main\n", stderr=""),
+            CompletedProcess(
+                [],
+                0,
+                stdout='{"html_url":"https://github.com/org/repo/pull/1","number":1}',
+                stderr="",
+            ),
+        ]
 
         exit_code = execute_push_and_pr_workflow(title="Dry run test", body="Testing", dry_run=True)
 
@@ -376,7 +431,13 @@ class TestDryRunWorkflow:
             CompletedProcess([], 0, stdout="feature\n", stderr=""),
             CompletedProcess([], 0, stdout=remote_output, stderr=""),
             CompletedProcess([], 0, stdout="", stderr=""),
-            CompletedProcess([], 0, stdout="", stderr=""),
+            CompletedProcess([], 0, stdout="main\n", stderr=""),
+            CompletedProcess(
+                [],
+                0,
+                stdout='{"html_url":"https://github.com/org/repo/pull/1","number":1}',
+                stderr="",
+            ),
         ]
 
         execute_push_and_pr_workflow(title="Test", body="Test", dry_run=True)
@@ -400,7 +461,13 @@ class TestWorkflowOutputs:
             CompletedProcess([], 0, stdout="main\n", stderr=""),
             CompletedProcess([], 0, stdout=remote_output, stderr=""),
             CompletedProcess([], 0, stdout="Pushed\n", stderr=""),
-            CompletedProcess([], 0, stdout="https://github.com/org/repo/pull/999\n", stderr=""),
+            CompletedProcess([], 0, stdout="main\n", stderr=""),
+            CompletedProcess(
+                [],
+                0,
+                stdout='{"html_url":"https://github.com/org/repo/pull/999","number":999}\n',
+                stderr="",
+            ),
         ]
 
         exit_code = execute_push_and_pr_workflow(title="Test", body="Test", dry_run=False)
@@ -445,7 +512,13 @@ class TestWorkflowProgressMessages:
             CompletedProcess([], 0, stdout="main\n", stderr=""),
             CompletedProcess([], 0, stdout=remote_output, stderr=""),
             CompletedProcess([], 0, stdout="Pushed\n", stderr=""),
-            CompletedProcess([], 0, stdout="https://github.com/org/repo/pull/1\n", stderr=""),
+            CompletedProcess([], 0, stdout="main\n", stderr=""),
+            CompletedProcess(
+                [],
+                0,
+                stdout='{"html_url":"https://github.com/org/repo/pull/1","number":1}\n',
+                stderr="",
+            ),
         ]
 
         execute_push_and_pr_workflow(title="Test", body="Test", dry_run=False)

@@ -2,7 +2,7 @@
 
 Composable configuration system replacing the monolithic CLAUDE.md with layered presets that instances mix and match.
 
-**Epic**: RHCLOUD-48670  
+**Epic**: RHCLOUD-48670
 **Spike**: RHCLOUD-48671
 
 ---
@@ -498,47 +498,48 @@ The workflow preset (`jira-sprint`) stays the same — the `source` field in `in
 
 ## CLAUDE.md Decomposition
 
-The current 432-line CLAUDE.md splits into:
+Instructions are layered so shared behavior is edited once:
 
-### `presets/core/CLAUDE.md` (~100 lines) — Always loaded
+### `presets/core/CLAUDE.md` — Always loaded
 
 - `# Dev Bot Agent` header
 - `## Output Mode — Ultra Caveman`
 - `## Turn Budget`
-- `## Security Rules` (including Org Membership Verification)
+- `## Security Rules` (behavioral Layer 1 + org membership; hook-enforced items collapsed)
 - `## Primary Label`
 - `## Instance ID`
-- `## Memory System` (task tools, cycle progress, memory tools, org membership, slack notifications)
-- `## Progress Tracking`
-- `## Rules` (general rules that apply to all workflows)
+- `## Memory System` (constraints, not param-dump tables — schemas are injected at runtime)
+- `## Core Rules`
 
-### `presets/workflows/jira-sprint/CLAUDE.md` (~330 lines) — Jira sprint workflow
+### `presets/shared/claude/jira-loop.md` — Kanban + sprint via `claude_includes`
 
-- `## Workflow Loop` (the main decision engine)
-- `### Triage`
-- `### Priority 0: Resume + Respond to Feedback`
-- `### Priority 1: Maintain Existing PRs`
-- `### Priority 1.5: Check Assigned Tickets`
-- `### Priority 2: New Jira Work`
-  - `#### Investigation Tickets`
-  - `#### Check Linked Issues`
-  - `#### Implement` (the full 13-step implementation flow)
+- `## Workflow Loop` (Priority 0–2, PR maintenance)
+- Investigation, linked issues, implement (clone/personas/tests kept; claim/push/post-PR via skills)
+- Progress tracking + rules
+
+### Workflow overlays (`presets/workflows/jira-sprint/CLAUDE.md`, `jira-kanban/CLAUDE.md`)
+
+Thin deltas only: candidate source + claim/sprint vs kanban note. Onboarding keeps its own full CLAUDE.md (no `claude_includes`).
 
 ### Assembly
 
 At startup, the final CLAUDE.md is assembled by concatenation:
 
 ```
-core/CLAUDE.md + workflow/CLAUDE.md + [instance/CLAUDE.md if strategy=append]
+core + [instance-shared] + [claude_includes] + workflow overlay + [instance if strategy=append]
 ```
 
 Or if `strategy=replace`:
 
 ```
-core/CLAUDE.md + instance/CLAUDE.md
+core + [instance-shared] + instance
 ```
 
+(`claude_includes` and the workflow overlay are skipped.)
+
 The core CLAUDE.md is always first — security rules must be seen before any workflow instructions.
+
+`claude_includes` paths are relative to `presets/`. A missing include is fatal.
 
 ## Build-Time Behavior
 
@@ -601,7 +602,7 @@ def load_instance_config(remote_agent_dir: Path | None) -> InstanceConfig:
         yaml_path = remote_agent_dir / "instance.yaml"
         if yaml_path.exists():
             return InstanceConfig.from_yaml(yaml_path)
-    
+
     # Fallback: env var override
     workflow = os.environ.get("BOT_WORKFLOW_PRESET", "jira-sprint")
     envs = os.environ.get("BOT_ENV_PRESETS", "browser,slack").split(",")

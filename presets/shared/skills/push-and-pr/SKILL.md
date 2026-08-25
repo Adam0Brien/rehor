@@ -6,7 +6,8 @@ description: >
 when_to_use: >
   Invoke after implementing changes and committing to push and create PR. Triggers on:
   "push and pr", "create pr", "open pr", "git push pr". Replaces manual git push +
-  gh pr create / glab mr create calls.
+  gh pr create / glab mr create. GitHub PRs are created with `gh api` (thin client
+  cannot run `gh pr create`).
 user-invocable: true
 allowed-tools:
   - "Bash(python3 .claude/skills/push-and-pr/scripts/push_and_pr_operations.py *)"
@@ -53,7 +54,7 @@ The script executes 4 operations in sequence:
 1. **Detect repository** - Determine repo type (GitHub/GitLab, fork/direct) from project-repos.json or git remotes
 2. **Sync fork** - Sync fork with upstream if using a fork (gh repo sync / glab repo sync)
 3. **Push branch** - Push current branch with proper credential helper (gh auth / glab auth)
-4. **Create PR** - Create PR/MR with correct flags (--head for forks, --repo for upstream)
+4. **Create PR** - GitHub: `gh api POST /repos/{owner}/{repo}/pulls` (not `gh pr create`). GitLab: `glab mr create`.
 
 ## Repository Detection
 

@@ -107,7 +107,7 @@ These MCP servers must be available (typically via the shared proxy):
 
 ```
 presets/workflows/jira-sprint/
-├── CLAUDE.md              # Decision loop instructions (the bot's "brain")
+├── CLAUDE.md              # Workflow overlay (jira-*) or full loop (onboarding)
 ├── manifest.yaml          # Metadata — preflight list, skills, requirements
 └── preflight/             # Pre-session scripts (thin wrappers → shared modules)
     ├── 01-gh-pr-status.py

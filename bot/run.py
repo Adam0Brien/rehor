@@ -27,6 +27,7 @@ from .config import (
     InstanceConfig,
     load_config,
     load_instance_config,
+    load_manifest,
     load_mcp_servers,
     resolve_active_envs,
     resolve_workflow_dir,
@@ -270,20 +271,40 @@ def _read_sleep_signal(config: Config, instance_id: str | None = None) -> int:
     return sleep_seconds
 
 
+def _load_claude_includes(script_dir: Path, workflow: str, remote_agent_dir: Path | None) -> list[str]:
+    """Read claude_includes from the workflow manifest. Missing files are fatal."""
+    logger = logging.getLogger(__name__)
+    manifest = load_manifest(script_dir, workflow, remote_agent_dir) or {}
+    includes = manifest.get("claude_includes") or []
+    if not includes:
+        return []
+
+    parts: list[str] = []
+    presets = script_dir / "presets"
+    for rel in includes:
+        path = presets / rel
+        if not path.is_file():
+            logger.error("FATAL: claude_includes entry '%s' not found at %s", rel, path)
+            sys.exit(1)
+        parts.append(path.read_text())
+        logger.info("CLAUDE.md: included %s", path)
+    return parts
+
+
 def assemble_claude_md(
     script_dir: Path,
     instance_config: InstanceConfig | None = None,
     remote_agent_dir: Path | None = None,
     shared_agent_dir: Path | None = None,
 ) -> None:
-    """Concatenate core + shared + workflow preset CLAUDE.md into project root.
+    """Concatenate core + shared + claude_includes + workflow CLAUDE.md into project root.
 
-    Layer order: core → shared → workflow → instance.
+    Layer order: core → shared → claude_includes → workflow → instance.
 
     Supports instance CLAUDE.md via claude_md_strategy:
-      replace — core + shared + instance CLAUDE.md (skip workflow)
-      append  — core + shared + workflow + instance CLAUDE.md
-      ignore  — core + shared + workflow only (default)
+      replace — core + shared + instance CLAUDE.md (skip includes + workflow)
+      append  — core + shared + includes + workflow + instance CLAUDE.md
+      ignore  — core + shared + includes + workflow only (default)
     """
     logger = logging.getLogger(__name__)
     presets = script_dir / "presets"
@@ -310,6 +331,7 @@ def assemble_claude_md(
         parts.append(instance_md.read_text())
         logger.info("CLAUDE.md strategy=replace — using instance CLAUDE.md instead of workflow")
     else:
+        parts.extend(_load_claude_includes(script_dir, workflow, remote_agent_dir))
         wf_path = resolve_workflow_dir(script_dir, workflow, remote_agent_dir) / "CLAUDE.md"
         if wf_path.is_file():
             parts.append(wf_path.read_text())

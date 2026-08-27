@@ -17,8 +17,6 @@ from .tools.tasks import ACTIVE_STATUSES
 
 logger = logging.getLogger(__name__)
 
-wake_signals: set[str] = set()
-
 
 def _parse_json_field(value):
     if isinstance(value, str):
@@ -621,7 +619,6 @@ def _instance_row(r, active_tasks: int = 0) -> dict:
         "last_idle_reminder_sent_at": (
             r["last_idle_reminder_sent_at"].isoformat() if r.get("last_idle_reminder_sent_at") else None
         ),
-        "last_seen": r["last_seen"].isoformat() if r.get("last_seen") else None,
     }
 
 
@@ -672,7 +669,7 @@ async def api_instance_idle_update(request: Request) -> JSONResponse:
 async def api_costs(request: Request) -> JSONResponse:
     """GET /api/costs — list cycle cost records. POST to add one."""
     if request.method == "POST":
-        return await api_costs_add(request)
+        return await _api_costs_add(request)
     pool = get_pool()
     limit = int(request.query_params.get("limit", "200"))
     date_filter, date_params = _parse_date_filter(request)
@@ -732,7 +729,7 @@ async def api_costs(request: Request) -> JSONResponse:
     return JSONResponse({"items": items, "daily": daily})
 
 
-async def api_costs_add(request: Request) -> JSONResponse:
+async def _api_costs_add(request: Request) -> JSONResponse:
     """POST /api/costs — record a new cycle cost entry."""
     pool = get_pool()
     body = await request.json()
@@ -768,6 +765,7 @@ async def api_costs_add(request: Request) -> JSONResponse:
         body.get("instance_id"),
     )
     cycle = _cycle(row)
+
     await bus.publish(Event("cycle_recorded", cycle))
     return JSONResponse(cycle, status_code=201)
 
@@ -847,6 +845,8 @@ async def api_analytics(request: Request) -> JSONResponse:
     )
 
     # Ticket lifecycle — cycles per ticket, impl vs review, cost, time to resolve
+    # Qualify column refs for the JOIN (both cycles and tasks have instance_id/timestamp)
+    c_date_filter = date_filter.replace("instance_id", "c.instance_id").replace("timestamp", "c.timestamp")
     ticket_rows = await pool.fetch(
         f"""
         SELECT
@@ -861,7 +861,7 @@ async def api_analytics(request: Request) -> JSONResponse:
             ROUND(EXTRACT(EPOCH FROM (MAX(c.timestamp) - MIN(c.timestamp)))/3600.0, 1) AS hours_span
         FROM cycles c
         LEFT JOIN tasks t ON t.external_key = c.external_key
-        WHERE {date_filter} AND c.external_key IS NOT NULL AND NOT c.no_work
+        WHERE {c_date_filter} AND c.external_key IS NOT NULL AND NOT c.no_work
         GROUP BY c.external_key, t.title, t.status, t.repo
         ORDER BY total_cycles DESC
         LIMIT 30
@@ -1294,40 +1294,6 @@ async def api_cycle_runs_by_task(request: Request) -> JSONResponse:
             }
         )
     return JSONResponse({"items": groups, "total": len(groups)})
-
-
-async def api_instance_wake_trigger(request: Request) -> JSONResponse:
-    """POST /api/instances/{instance_id}/wake — request a sleeping bot to wake up."""
-    pool = get_pool()
-    instance_id = request.path_params.get("instance_id")
-    if not instance_id:
-        return JSONResponse({"error": "missing instance_id"}, status_code=400)
-
-    row = await pool.fetchrow("SELECT instance_id FROM bot_instances WHERE instance_id = $1", instance_id)
-    if not row:
-        return JSONResponse({"error": f"Instance {instance_id} not found"}, status_code=404)
-
-    wake_signals.add(instance_id)
-    await bus.publish(Event("instance_wake", {"instance_id": instance_id}))
-    return JSONResponse({"ok": True})
-
-
-async def api_instance_wake_check(request: Request) -> JSONResponse:
-    """GET /api/instances/{instance_id}/wake — poll for a wake signal (consumed on read)."""
-    instance_id = request.path_params.get("instance_id")
-    if not instance_id:
-        return JSONResponse({"error": "missing instance_id"}, status_code=400)
-
-    pool = get_pool()
-    await pool.execute(
-        "UPDATE bot_instances SET last_seen = NOW() WHERE instance_id = $1",
-        instance_id,
-    )
-
-    if instance_id in wake_signals:
-        wake_signals.discard(instance_id)
-        return JSONResponse({"wake": True})
-    return JSONResponse({"wake": False})
 
 
 def _task(row, slack_notif=None) -> dict:

@@ -38,6 +38,8 @@ The script executes 8 operations in sequence:
 
 All operations use **fail-fast error handling**: if any operation fails, execution stops immediately.
 
+**After the script succeeds:** do not call `jira_update_issue`, `jira_get_transitions`, `jira_transition_issue`, or `jira_add_issues_to_sprint` for this claim. Continue with implementation.
+
 ## Configuration
 
 Set these environment variables:

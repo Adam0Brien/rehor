@@ -19,11 +19,12 @@ from claude_agent_sdk import (
 
 from .config import Config
 from .constants import MEMORY_API_BASE
+from .tool_compact import make_compact_hook
 
 logger = logging.getLogger(__name__)
 
-TURN_WARNING_THRESHOLD = 0.75  # warn at 75% of max_turns
-TURN_CRITICAL_THRESHOLD = 0.90  # urgent at 90%
+TURN_WARNING_THRESHOLD = 0.50  # warn at 50% of max_turns
+TURN_CRITICAL_THRESHOLD = 0.70  # urgent at 70%
 
 DASHBOARD_URL = os.environ.get("BOT_DASHBOARD_URL", f"{MEMORY_API_BASE}/bot-status")
 
@@ -148,10 +149,59 @@ def _make_turn_budget_hook(max_turns: int):
                     f"TURN BUDGET WARNING: ~{n}/{max_turns} tool calls used, "
                     f"~{remaining} remaining. Save progress via task_update soon "
                     "(summary + metadata with last_step, files_changed, next_step). "
-                    "Prioritize completing current step and saving state."
+                    "Do not start extra memory_search or jira_get_issue. "
+                    "Finish the current step or stop."
                 ),
             }
 
+        return {}
+
+    return hook
+
+
+def _bash_command(input_data: dict | None) -> str:
+    """Extract the Bash command string from a PostToolUse hook payload."""
+    payload = input_data or {}
+    inp = payload.get("tool_input") or payload.get("input") or {}
+    if isinstance(inp, dict):
+        return str(inp.get("command") or inp.get("cmd") or "")
+    if isinstance(inp, str):
+        return inp
+    return ""
+
+
+def _make_bookkeeping_done_hook():
+    """After /post-pr or /claim-ticket Bash succeeds, tell the model to stop calling Jira MCP."""
+
+    async def hook(input_data, tool_use_id, context):
+        del tool_use_id, context
+        payload = input_data or {}
+        tool_name = payload.get("tool_name", "")
+        if tool_name != "Bash":
+            return {}
+        cmd = _bash_command(payload)
+        if "--dry-run" in cmd:
+            return {}
+        if "post_pr.py" in cmd:
+            logger.info("bookkeeping_done skill=post-pr")
+            return {
+                "systemMessage": (
+                    "post-pr finished. STOP bookkeeping. Do NOT call "
+                    "jira_transition_issue, jira_add_comment, jira_get_transitions, "
+                    "or /slack-notify pr_created — those dump a full Jira issue "
+                    "(~5K tokens) into conversation history. progress_store is ok. "
+                    "/slack-notify needs_help only if blocked."
+                ),
+            }
+        if "claim_ticket_operations.py" in cmd:
+            logger.info("bookkeeping_done skill=claim-ticket")
+            return {
+                "systemMessage": (
+                    "claim-ticket finished. Do NOT call jira_update_issue, "
+                    "jira_get_transitions, jira_transition_issue, or "
+                    "jira_add_issues_to_sprint for this claim. Continue implementation."
+                ),
+            }
         return {}
 
     return hook
@@ -167,7 +217,9 @@ async def run_cycle(
     preflight_prompt: str | None = None,
 ) -> tuple[ResultMessage | None, CycleContext]:
     """Run a single bot cycle via the Claude Agent SDK."""
+    compact_hook = make_compact_hook()
     turn_hook = _make_turn_budget_hook(config.max_turns)
+    bookkeeping_hook = _make_bookkeeping_done_hook()
     options = ClaudeAgentOptions(
         model=config.model,
         max_turns=config.max_turns,
@@ -177,7 +229,11 @@ async def run_cycle(
         cwd=cwd,
         permission_mode="acceptEdits",
         hooks={
-            "PostToolUse": [HookMatcher(hooks=[turn_hook])],
+            "PostToolUse": [
+                HookMatcher(matcher="mcp__.*", hooks=[compact_hook]),
+                HookMatcher(matcher="Bash", hooks=[bookkeeping_hook]),
+                HookMatcher(hooks=[turn_hook]),
+            ],
         },
     )
 

@@ -10,6 +10,8 @@ from ..models import Task
 
 ACTIVE_STATUSES = ("in_progress", "pr_open", "pr_changes")
 MAX_ACTIVE = 10
+_SUMMARY_CAP = 150
+_MAX_PRS = 5
 
 
 def _row_to_task(row) -> dict:
@@ -39,6 +41,51 @@ def _row_to_task(row) -> dict:
         metadata=json.loads(row["metadata"]) if isinstance(row["metadata"], str) else (row["metadata"] or {}),
     )
     return task.model_dump(mode="json")
+
+
+def _mcp_prs(meta: dict) -> list[dict]:
+    out: list[dict] = []
+    for pr in (meta.get("prs") or [])[:_MAX_PRS]:
+        if not isinstance(pr, dict):
+            continue
+        slim = {k: pr[k] for k in ("repo", "number", "host") if k in pr and pr[k] is not None}
+        if slim:
+            out.append(slim)
+    return out
+
+
+def _mcp_task(task: dict) -> dict:
+    """Slim task payload for MCP conversation history. HTTP/dashboard keep full Task."""
+    meta = task.get("metadata") if isinstance(task.get("metadata"), dict) else {}
+    summary = task.get("summary") or ""
+    if isinstance(summary, str) and len(summary) > _SUMMARY_CAP:
+        summary = summary[:_SUMMARY_CAP]
+    last_addr = task.get("last_addressed")
+    last_addr = str(last_addr)[:16] if last_addr else None
+    out: dict = {
+        "id": task.get("id"),
+        "external_key": task.get("external_key"),
+        "status": task.get("status"),
+        "repo": task.get("repo"),
+        "branch": task.get("branch"),
+        "title": task.get("title"),
+    }
+    if summary:
+        out["summary"] = summary
+    if last_addr:
+        out["last_addressed"] = last_addr
+    if task.get("paused_reason"):
+        out["paused_reason"] = task["paused_reason"]
+    if meta.get("last_step"):
+        out["last_step"] = meta["last_step"]
+    if meta.get("next_step"):
+        out["next_step"] = meta["next_step"]
+    if meta.get("repos"):
+        out["repos"] = meta["repos"]
+    prs = _mcp_prs(meta)
+    if prs:
+        out["prs"] = prs
+    return {k: v for k, v in out.items() if v not in (None, "")}
 
 
 def register_task_tools(mcp: FastMCP):
@@ -72,7 +119,7 @@ def register_task_tools(mcp: FastMCP):
             f"SELECT * FROM tasks {where} ORDER BY created_at",
             *params,
         )
-        return [_row_to_task(r) for r in rows]
+        return [_mcp_task(_row_to_task(r)) for r in rows]
 
     @mcp.tool()
     async def task_get(
@@ -87,7 +134,7 @@ def register_task_tools(mcp: FastMCP):
             external_key,
             source_type,
         )
-        return _row_to_task(row) if row else None
+        return _mcp_task(_row_to_task(row)) if row else None
 
     @mcp.tool()
     async def task_add(
@@ -166,7 +213,7 @@ def register_task_tools(mcp: FastMCP):
                 },
             )
         )
-        return result
+        return _mcp_task(result)
 
     @mcp.tool()
     async def task_update(
@@ -255,7 +302,7 @@ def register_task_tools(mcp: FastMCP):
                 },
             )
         )
-        return result
+        return _mcp_task(result)
 
     @mcp.tool()
     async def task_remove(
@@ -275,7 +322,7 @@ def register_task_tools(mcp: FastMCP):
             raise ValueError(f"Task {external_key} not found")
         result = _row_to_task(row)
         await bus.publish(Event("task_archived", {"external_key": external_key}))
-        return result
+        return _mcp_task(result)
 
     @mcp.tool()
     async def task_check_capacity(instance_id: str | None = None) -> dict:

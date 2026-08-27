@@ -158,6 +158,49 @@ def fmt_comments(comments, label, since=None, max_comments=30):
     return "\n".join(lines)
 
 
+def _flatten_adf(node):
+    """Extract plain text from an Atlassian Document Format node."""
+    if node is None:
+        return ""
+    if isinstance(node, str):
+        return node
+    if isinstance(node, list):
+        return "\n".join(part for part in (_flatten_adf(x) for x in node) if part)
+    if not isinstance(node, dict):
+        return ""
+    ntype = node.get("type")
+    if ntype == "text":
+        return node.get("text") or ""
+    if ntype == "hardBreak":
+        return "\n"
+    inner = _flatten_adf(node.get("content") or [])
+    if ntype in ("paragraph", "heading", "blockquote", "listItem"):
+        return f"{inner}\n" if inner else ""
+    return inner
+
+
+def plain_jira_text(value):
+    """Coerce a Jira description or comment body to plain text."""
+    if not value:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        return _flatten_adf(value)
+    return str(value)
+
+
+def fmt_description(value, indent="  "):
+    """Format a Jira description as indented preflight lines."""
+    text = plain_jira_text(value).strip()
+    if not text:
+        return []
+    lines = [f"{indent}description:"]
+    for dl in text.split("\n"):
+        lines.append(f"{indent}  {dl}")
+    return lines
+
+
 def fmt_task_header(task):
     """Format common task fields as header lines."""
     key = task.get("external_key", "?")

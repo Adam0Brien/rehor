@@ -14,7 +14,7 @@ ONE item/cycle. Priority order:
 
 ### Input Data
 
-Task statuses, PR/MR states, Jira comments, PR comments, capacity — in input prompt. Do NOT re-fetch. `[jira unavailable]` → `jira_get_issue` MCP for those only.
+Task statuses, PR/MR states, Jira comments, PR comments, capacity — in input prompt. Do NOT re-fetch. `[jira unavailable]` → `jira_get_issue` / `jira_search` with `fields="summary,status,assignee,labels,issuelinks,comment,updated,description"` and `comment_limit=100`. Never call those tools without those args.
 
 ### Priority 0: Resume + Respond to Feedback
 
@@ -61,7 +61,7 @@ PR statuses in input. For each `pr_open`/`pr_changes`:
 - Reply via `gh` / `glab api`. `task_update last_addressed`. `memory_store` notable as `review_feedback`. Jira comment.
 
 **Jira comments**:
-- `jira_get_issue` → ALL comments. Bot = content patterns only. Short conversational = human. Shared identity → don't filter author.
+- Use `jira_comments` already in the input. `jira_get_issue` **only** if the prompt shows `[jira unavailable]`. Bot = content patterns only. Short conversational = human. Shared identity → don't filter author.
 - Question → reply. Change req → impl+commit+push+reply. Ctx → incorporate. `task_update last_addressed`.
 
 **PR merged**: `/wrap-up` w/ Jira key. Handles: archival, Jira → "Release Pending", Slack, branch cleanup. After:
@@ -117,7 +117,7 @@ Pick first candidate. At capacity → `needs-investigation` only. No candidates 
 
 #### Check Linked Issues
 
-Before work, `jira_get_issue` → check links:
+Links are in the input prompt. Check them (`jira_get_issue` **only** if `[jira unavailable]`):
 
 1. **Dups**: Done/merged → comment, "Release Pending", skip. In progress → comment, link, skip.
 2. **Blocked by**: Unresolved → comment, stop.
@@ -133,14 +133,9 @@ Before work, `jira_get_issue` → check links:
    {"last_step": "branch_created", "next_step": "implement", "repos": ["pdf-generator", "app-interface"]}
    ```
 
-3. **Details**: `jira_get_issue` — title, desc, acceptance criteria.
+3. **Details**: title, description, acceptance criteria, and links are in the input prompt. `jira_get_issue` **only** if `[jira unavailable]` (`fields=` + `comment_limit=100` as above).
 
-4. **Search memory** (multiple queries):
-   - Ticket desc/title
-   - By repo (`repo` filter) → repo-specific patterns
-   - By category: `review_feedback` + repo, `codebase_pattern` + repo, `learning`
-   - By tags: `css`, `testing`, `patternfly`, `ci`, `dependency-upgrade`
-   - Apply ALL. Avoid past corrections. Follow conventions.
+4. **Search memory**: one `memory_search` (ticket + repo) before impl. More queries only if that returns nothing useful. Apply ALL. Avoid past corrections. Follow conventions.
 
 5. **Prepare repos**: `repo:` labels → match `project-repos.json`. Bare (`repo:insights-chrome`) or org-prefixed — resolved via upstream URLs. Fork workflow default: `url` = fork, `upstream` = original (PR target), `host` = "gitlab" if GL, `readonly` = read only.
 
@@ -215,9 +210,7 @@ Before work, `jira_get_issue` → check links:
      "prs": [{"repo": "...", "number": 42, "url": "...", "host": "github"}]}
     ```
 
-12. **Jira**: `jira_transition_issue` → "Code Review". `jira_add_comment`: what done, PR links, concerns. Update linked w/ PR links.
-
-13. **Slack**: `/slack-notify` `pr_created`: "{KEY}: {title} — PR: {url}". Also `needs_help` if blocked.
+12. **Bookkeeping**: MUST invoke `/post-pr` **once**. Script success → **STOP**. Do **not** call `jira_transition_issue`, `jira_add_comment`, `jira_get_transitions`, or `/slack-notify pr_created` — `/post-pr` already did Code Review + comment + Slack + learnings. Extra Jira MCP dumps ~5K issue JSON into history every later turn. `progress_store` ok. `/slack-notify needs_help` only if blocked.
 
 ## Progress Tracking
 
@@ -246,5 +239,5 @@ Idle/err: `run.py` handles. No agent action.
 - Stay in ticket scope
 - **No Jira spam**: Read existing first. Same info posted → don't repeat
 - **Store learnings**: After completion/feedback → `memory_store` w/ category + `repo` + `tags`
-- **Search before starting**: Multiple `memory_search` (step 4). Avoid repeating mistakes.
+- **Search before starting**: One `memory_search` (ticket + repo) before impl (step 4). More only if empty. Avoid repeating mistakes.
 - **Use runtime env vars**: Never add custom `BOT_*` if runtime provides equivalent. Use `GH_USER_NAME`/`BOT_JIRA_EMAIL`/`BOT_CONFIG_PATH`. Check deploy config first.

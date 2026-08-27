@@ -26,6 +26,31 @@ def _row_to_cycle_run(row) -> dict:
     return run.model_dump(mode="json")
 
 
+def _mcp_progress_ack(run: dict) -> dict:
+    return {
+        "id": run["id"],
+        "task_id": run.get("task_id"),
+        "cycle_type": run.get("cycle_type"),
+    }
+
+
+def _mcp_progress_entry(run: dict) -> dict:
+    out: dict = {
+        "id": run["id"],
+        "task_id": run.get("task_id"),
+        "cycle_type": run.get("cycle_type"),
+        "progress": run.get("progress") or {},
+        "started_at": run.get("started_at"),
+    }
+    if run.get("finished_at"):
+        out["finished_at"] = run["finished_at"]
+    if run.get("tool_calls") is not None:
+        out["tool_calls"] = run["tool_calls"]
+    if run.get("tokens_used") is not None:
+        out["tokens_used"] = run["tokens_used"]
+    return out
+
+
 _CYCLE_RUN_COLUMNS = (
     "id, task_id, cycle_type, instance_id, started_at, finished_at, tool_calls, tokens_used, progress, created_at"
 )
@@ -104,7 +129,7 @@ def register_cycle_tools(mcp: FastMCP):
                 },
             )
         )
-        return result
+        return _mcp_progress_ack(result)
 
     @mcp.tool()
     async def progress_load(
@@ -143,4 +168,4 @@ def register_cycle_tools(mcp: FastMCP):
             """,
             *params,
         )
-        return [_row_to_cycle_run(r) for r in rows]
+        return [_mcp_progress_entry(_row_to_cycle_run(r)) for r in rows]

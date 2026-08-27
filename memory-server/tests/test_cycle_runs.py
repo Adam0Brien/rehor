@@ -474,6 +474,7 @@ async def test_progress_store(mock_pool_for_tools, mcp_with_tools):
 
     assert result["id"] == 1
     assert result["task_id"] == 42
+    assert set(result) == {"id", "task_id", "cycle_type"}
     mock_pool_for_tools.fetchrow.assert_called_once()
     query = mock_pool_for_tools.fetchrow.call_args[0][0]
     assert "INSERT INTO cycle_runs" in query
@@ -535,6 +536,8 @@ async def test_progress_load(mock_pool_for_tools, mcp_with_tools):
 
     assert len(results) == 2
     assert results[0]["id"] == 1
+    assert "created_at" not in results[0]
+    assert "progress" in results[0]
     mock_pool_for_tools.fetch.assert_called_once()
     query = mock_pool_for_tools.fetch.call_args[0][0]
     assert "task_id = $1" in query

@@ -132,7 +132,7 @@ Tags: `bug-fix`, `cve`, `css`, `patternfly`, `dependency-upgrade`, `ci`, `ui-cha
 
 Memory is a **persistent knowledge base** across cycles. Use it proactively to improve accuracy — not just at prescribed checkpoints.
 
-**Search before acting**: Before exploring unfamiliar code, making architectural decisions, or starting implementation, run multiple `memory_search` queries:
+**Search before acting**: Before exploring unfamiliar code, making architectural decisions, or starting implementation, run **one** `memory_search` (ticket summary + repo). More queries only if that returns nothing useful:
 - By repo (`repo` filter) → repo-specific patterns, past fixes, conventions
 - By category: `review_feedback` (avoid past reviewer corrections), `codebase_pattern`, `learning`
 - By relevant tags: `css`, `testing`, `patternfly`, `ci`, `dependency-upgrade`, etc.

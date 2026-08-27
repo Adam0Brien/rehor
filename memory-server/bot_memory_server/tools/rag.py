@@ -24,6 +24,14 @@ def _row_to_memory(row) -> dict:
     return memory.model_dump(mode="json")
 
 
+_MCP_MEMORY_KEYS = ("id", "category", "repo", "title", "content", "tags", "similarity")
+
+
+def _mcp_memory(item: dict) -> dict:
+    """Slim memory payload for MCP conversation history."""
+    return {k: item[k] for k in _MCP_MEMORY_KEYS if k in item}
+
+
 def _row_to_search_result(row) -> dict:
     result = MemorySearchResult(
         id=row["id"],
@@ -78,7 +86,7 @@ def register_rag_tools(mcp: FastMCP):
             vector,
             json.dumps(metadata or {}),
         )
-        result = _row_to_memory(row)
+        result = _mcp_memory(_row_to_memory(row))
         await bus.publish(
             Event(
                 "memory_stored",
@@ -128,7 +136,7 @@ def register_rag_tools(mcp: FastMCP):
             """,
             *params,
         )
-        return [_row_to_search_result(r) for r in rows]
+        return [_mcp_memory(_row_to_search_result(r)) for r in rows]
 
     @mcp.tool()
     async def memory_list(
@@ -180,7 +188,7 @@ def register_rag_tools(mcp: FastMCP):
             *params,
         )
         return {
-            "items": [_row_to_memory(r) for r in rows],
+            "items": [_mcp_memory(_row_to_memory(r)) for r in rows],
             "total": total,
             "limit": limit,
             "offset": offset,

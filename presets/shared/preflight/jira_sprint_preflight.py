@@ -16,6 +16,7 @@ from common import (
     INSTANCE_ID,
     build_repo_lookup,
     fmt_comments,
+    fmt_description,
     fmt_task_header,
     get_capacity,
     get_task_prs,
@@ -46,7 +47,7 @@ def _jira_issue(key):
         "jira_get_issue",
         {
             "issue_key": key,
-            "fields": "summary,status,assignee,labels,issuelinks,comment,updated",
+            "fields": "summary,status,assignee,labels,issuelinks,comment,updated,description",
             "comment_limit": JIRA_COMMENT_LIMIT,
         },
     )
@@ -92,6 +93,7 @@ def _fmt_jira(task, jira_data, jira_comments):
             if linked:
                 status = linked.get("fields", {}).get("status", {}).get("name", "?")
                 lines.append(f"  link: {lt} {linked.get('key', '?')} [{status}]")
+        lines.extend(fmt_description(fields.get("description")))
         last_addr = task.get("last_addressed")
         jc = [
             {
@@ -246,9 +248,7 @@ def _fmt_candidate(c):
             lk_status = linked.get("fields", {}).get("status", {}).get("name", "?")
             lines.append(f"  link: {lt} {linked.get('key', '?')} [{lk_status}]")
     if c["description"]:
-        lines.append("  description:")
-        for dl in c["description"].strip().split("\n"):
-            lines.append(f"    {dl}")
+        lines.extend(fmt_description(c["description"]))
     if c["comments"]:
         lines.append(f"  comments ({len(c['comments'])}):")
         for cm in c["comments"]:

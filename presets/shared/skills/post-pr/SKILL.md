@@ -11,11 +11,6 @@ user-invocable: true
 allowed-tools:
   - "Bash(python3 .claude/skills/post-pr/post_pr.py *)"
   - Read
-  - mcp__bot-memory__task_update
-  - mcp__bot-memory__bot_status_update
-  - mcp__bot-memory__memory_store
-  - mcp__mcp-atlassian__jira_transition_issue
-  - mcp__mcp-atlassian__jira_add_comment
 ---
 
 Run the post-pr script for a newly created PR:
@@ -38,6 +33,8 @@ The script:
 5. Sends Slack notification (`pr_created`)
 6. Stores implementation learnings
 7. Updates bot status → `idle`
+
+**After the script succeeds: STOP.** Do not call `jira_transition_issue`, `jira_add_comment`, `jira_get_transitions`, `task_update`, `memory_store`, `bot_status_update`, or `/slack-notify pr_created`. The script already did those via its own MCP/HTTP clients. Extra conversation Jira calls dump a full issue (~5K tokens) into history.
 
 ## Operations Performed
 

@@ -14,6 +14,7 @@ sys.path.insert(0, str(SKILLS_DIR))
 from jira_sprint_preflight import (
     JIRA_COMMENT_LIMIT,
     _comments_may_be_truncated,
+    _fmt_jira,
     _has_new_jira_feedback,
     main,
 )
@@ -512,3 +513,27 @@ def test_truncated_comments_trigger_feedback(env_vars, monkeypatch, capsys):
     out = json.loads(capsys.readouterr().out.strip())
     assert out["status"] == "start"
     assert "JIRA FEEDBACK" in out["content"]
+
+
+def test_fmt_jira_includes_description():
+    task = {"external_key": "TEST-1", "status": "in_progress", "repo": "r", "title": "t"}
+    jira_data = {
+        "fields": {
+            "status": {"name": "In Progress"},
+            "labels": ["kessel-ai-local"],
+            "issuelinks": [],
+            "description": "Add a CLI CSV mode.\nReuse EstimateCost.",
+        }
+    }
+    out = _fmt_jira(task, jira_data, [])
+    assert "description:" in out
+    assert "Add a CLI CSV mode." in out
+    assert "jira_status: In Progress" in out
+    assert "jira_comments" in out
+
+
+def test_fmt_jira_unavailable_unchanged():
+    task = {"external_key": "TEST-1", "status": "in_progress", "repo": "r"}
+    out = _fmt_jira(task, None, [])
+    assert "[jira unavailable — use jira_get_issue]" in out
+    assert "description:" not in out

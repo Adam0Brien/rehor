@@ -63,8 +63,12 @@ without changing the other.
 6. Verify `BOT_EXECUTION_ENGINE=coordinator` is set deliberately,
    `CYCLE_RUNS_API_URL` is configured, and the OpenCode deployment JSON declares
    the prepared provider with exact package versions and environment references.
-7. Verify preflight `skip` and `error` outcomes do not start a runtime.
-8. Run one local/staging `--once` cycle first; verify `/health`, `/ready`,
+7. For an OpenAI route (`rehor-openai` or `rehor-openai-chat`), verify the
+   runner's SandboxTemplate egress list allows TCP/8450 to `devbot-proxy` (see
+   `deploy/sandbox-template.example.yaml`); without it the gateway is
+   unreachable and every cycle fails.
+8. Verify preflight `skip` and `error` outcomes do not start a runtime.
+9. Run one local/staging `--once` cycle first; verify `/health`, `/ready`,
    `/metrics`, local JSONL output, HTTP projections, transcript compression,
    and lock release.
 

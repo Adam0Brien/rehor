@@ -255,9 +255,10 @@ before OpenCode starts. The token is only the bot-side API-key value that the
 proxy overwrites; the real OpenAI key remains proxy-only. Compose sets both
 values directly. OpenShift defaults the gateway host from `PROXY_HOST` and uses
 the same placeholder token. The proxy's ingress NetworkPolicy already admits
-TCP/8450 from devbot pods; the template adds no egress policy, because selecting
-a runner pod with one would also cut its DNS, memory-server, and other proxy
-traffic. Custom deployment configs must
+TCP/8450 from devbot pods. OpenShell runners also need the port in their
+SandboxTemplate's managed egress list; `deploy/sandbox-template.example.yaml`
+includes it, but instance templates copied from an older example must add it.
+Custom deployment configs must
 keep credentials out of JSON and use environment references such as
 `{env:REHOR_MODEL_PROXY_URL}` and `{env:REHOR_MODEL_PROXY_TOKEN}`. Use `--once`
 for a single preflight or attempt. The local sink writes `data/costs.jsonl`,

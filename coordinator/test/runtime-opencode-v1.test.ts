@@ -2184,6 +2184,11 @@ function createTestSupervisor(
     workspaceRoot: TEST_WORKSPACE,
     // FakeChild uses a synthetic PID; never probe the host process table by default.
     processGroupExists: () => false,
+    // Never signal it either: a real process group may own that PID. Report the
+    // group as gone so the supervisor falls back to the fake child's kill().
+    signalProcess: () => {
+      throw Object.assign(new Error("kill ESRCH"), { code: "ESRCH" });
+    },
     ...options,
   });
 }

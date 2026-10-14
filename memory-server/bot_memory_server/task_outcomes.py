@@ -633,13 +633,6 @@ async def api_task_outcomes_summary(request: Request) -> JSONResponse:
         FROM filtered""",
         *params,
     )
-    repository_count = await pool.fetchval(
-        f"""{cte}
-        SELECT COUNT(DISTINCT repositories.repo)
-        FROM filtered f
-        CROSS JOIN LATERAL jsonb_array_elements_text(f.canonical_repositories) AS repositories(repo)""",
-        *params,
-    )
     repository_rows = await pool.fetch(
         f"""{cte}
         SELECT repositories.repo,
@@ -753,6 +746,7 @@ async def api_task_outcomes_summary(request: Request) -> JSONResponse:
                 "providers": providers_by_repo.get(row["repo"], {}),
             }
         )
+    repository_count = len(repositories)
 
     accepted = counts["accepted_count"]
     rejected = counts["rejected_count"]

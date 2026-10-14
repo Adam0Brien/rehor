@@ -145,7 +145,6 @@ async def test_summary_includes_obsolete_in_acceptance_and_tracks_outcome_covera
             "unreported_count": 1,
             "wip_count": 1,
         },
-        scalar=4,
         fetch_rows=[
             [
                 {
@@ -237,7 +236,7 @@ async def test_summary_includes_obsolete_in_acceptance_and_tracks_outcome_covera
             "unreportedCount": 2,
             "wipCount": 1,
         },
-        "repositoryCount": 4,
+        "repositoryCount": 2,
         "acceptedCount": 1,
         "acceptedNoOpCount": 1,
         "rejectedCount": 1,
@@ -280,7 +279,7 @@ async def test_summary_includes_obsolete_in_acceptance_and_tracks_outcome_covera
     assert body["repositories"][0]["providers"] == {"github": 2}
     assert body["backfill"] == {"state": "not_started", "unknownCount": 1}
     assert body["period"] == {"from": "2026-10-01", "to": "2026-10-01"}
-    assert len(pool.calls) == 5
+    assert len(pool.calls) == 4
     assert all("WITH task_outcomes AS" in query for _, query, _ in pool.calls)
     assert all("category = 'delivery'" in query for _, query, _ in pool.calls if "accepted_count" in query)
     for _, query, _ in pool.calls:

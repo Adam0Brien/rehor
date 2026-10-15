@@ -429,9 +429,9 @@ def _filtered_cte(
         params.append(value)
         conditions.append(expression.format(index=len(params)))
 
-    repo = request.query_params.get("repo")
-    if repo:
-        add(repo, "canonical_repositories ? ${index}")
+    repos = request.query_params.getlist("repo")
+    if repos:
+        add(repos, "canonical_repositories ?| ${index}::text[]")
 
     category = request.query_params.get("category")
     if category:

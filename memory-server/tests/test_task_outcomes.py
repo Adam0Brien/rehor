@@ -14,6 +14,7 @@ from bot_memory_server.models import OutcomeArtifact, OutcomeEvidence
 from bot_memory_server.outcome_classifier import classify_task_outcome
 from bot_memory_server.task_outcomes import (
     ARCHIVE_RECOVERY,
+    _filtered_cte,
     api_task_outcome_detail,
     api_task_outcomes,
     api_task_outcomes_summary,
@@ -26,6 +27,7 @@ from fastmcp import Client, FastMCP
 from httpx import ASGITransport, AsyncClient
 from pydantic import ValidationError
 from starlette.applications import Starlette
+from starlette.requests import Request
 from starlette.routing import Route
 from test_api_schemas import _validate
 
@@ -119,6 +121,38 @@ class FakePool:
         if self.fetch_rows:
             return self.fetch_rows.pop(0)
         return self.rows
+
+
+def test_filtered_cte_supports_repeated_repository_filters_and_preserves_single_repo_compatibility():
+    """Use one PostgreSQL array filter for both single and repeated repo params."""
+    request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/api/task-outcomes/summary",
+            "query_string": b"repo=org%2Frepo-a&repo=org%2Frepo-b",
+            "headers": [],
+        }
+    )
+
+    query, params = _filtered_cte(request)
+
+    assert "canonical_repositories ?| $1::text[]" in query
+    assert params == [["org/repo-a", "org/repo-b"]]
+
+    single_request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/api/task-outcomes/summary",
+            "query_string": b"repo=org%2Frepo-a",
+            "headers": [],
+        }
+    )
+    single_query, single_params = _filtered_cte(single_request)
+
+    assert "canonical_repositories ?| $1::text[]" in single_query
+    assert single_params == [["org/repo-a"]]
 
 
 def _grooming_counts(**states):

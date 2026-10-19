@@ -301,14 +301,20 @@ intentionally omit a top-level model, so Python preparation selects
 `config.json`'s `opencode.model` (`gpt-6-luna`) unless `instance.yaml` or
 `BOT_MODEL` overrides it. The default `rehor-openai` provider uses
 `@ai-sdk/openai` and native Responses. OpenCode+Vertex retains the `claude.model`
-fallback, but the packaged defaults declare no `vertex` provider: supply a
-deployment config that declares one, or preparation fails with a preflight error
-before any attempt starts. Select `provider: rehor-openai-chat` and a model declared under that
-provider for Chat Completions through `@ai-sdk/openai-compatible`; undeclared
-models fail closed.
+fallback and is declared in packaged defaults alongside both OpenAI routes.
+Select `provider: vertex` to use Claude Sonnet 4.6, Opus 4.6, or Haiku 4.5 via
+the existing Vertex auth proxy. The runner sends OpenCode a placeholder bearer
+value; the proxy replaces it with its service-account token. Select
+`provider: rehor-openai-chat` and a model declared under that provider for Chat
+Completions through `@ai-sdk/openai-compatible`; undeclared models fail closed.
+The coordinator also selects a small model from the active provider's declared
+models, preventing OpenCode from silently using an unrelated, non-allowlisted
+title model.
 
 Both OpenAI routes use `REHOR_MODEL_PROXY_URL` and
-`REHOR_MODEL_PROXY_TOKEN`. The gateway must be
+`REHOR_MODEL_PROXY_TOKEN`. The Vertex route uses `REHOR_VERTEX_PROXY_URL`,
+resolved from existing `ANTHROPIC_VERTEX_BASE_URL` or the shared
+`devbot-proxy:8443` service. The gateway must be
 `http://<proxy-host>:8450/v1`; missing or invalid gateway/token settings fail
 before OpenCode starts. The token is only the bot-side API-key value that the
 proxy overwrites; the real OpenAI key remains proxy-only. Compose sets both
@@ -333,8 +339,11 @@ from the pinned UBI Node 22 builder, copies the ESM coordinator bundle, locked
 npm dependencies, and model-free `opencode-deployment.default.json`, installs
 `opencode-ai@1.18.29`, `@ai-sdk/openai@4.0.73`, and
 `@ai-sdk/openai-compatible@3.0.54`, and installs `zstd` for transcript
-compatibility. The first provider uses native Responses for GPT-6 Luna; the
-second preserves the compatible Chat Completions path. `entrypoint.sh` accepts
+compatibility. The Vertex provider module ships beside the ESM coordinator and
+uses pinned `@ai-sdk/google-vertex@4.0.181` with its token generator replaced by
+a non-secret placeholder; proxy injects actual Google auth. The first OpenAI
+provider uses native Responses for GPT-6 Luna; the second preserves the
+compatible Chat Completions path. `entrypoint.sh` accepts
 `BOT_EXECUTION_ENGINE=python|coordinator`; omitted or `python` always launches
 the existing Python/Claude runner. Set `coordinator` only with
 `BOT_INSTANCE_ID`, `CYCLE_RUNS_API_URL`, the proxy/memory services, and valid

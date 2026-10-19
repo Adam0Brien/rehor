@@ -17,6 +17,7 @@ export default defineConfig({
       entry: {
         index: "src/index.ts",
         cli: "src/cli.ts",
+        "vertex-provider": "src/runtimes/opencode-v1/vertex-provider.ts",
       },
       formats: ["es"],
       fileName: (_format, entryName) => entryName,

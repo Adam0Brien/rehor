@@ -1,4 +1,5 @@
 export const OPENCODE_MCP_URL_ENVIRONMENT = "JIRA_MCP_URL" as const;
+export const OPENCODE_VERTEX_PROXY_URL_ENVIRONMENT = "REHOR_VERTEX_PROXY_URL" as const;
 
 export const OPENCODE_BLOCKED_PASSTHROUGH = [
   "ANTHROPIC_API_KEY",
@@ -29,6 +30,7 @@ export const OPENCODE_BLOCKED_PASSTHROUGH_PREFIXES = [
 export const OPENCODE_PROVIDER_ENVIRONMENT_ALLOWLIST = [
   "REHOR_MODEL_PROXY_TOKEN",
   "REHOR_MODEL_PROXY_URL",
+  OPENCODE_VERTEX_PROXY_URL_ENVIRONMENT,
 ] as const;
 
 export const OPENCODE_ENVIRONMENT_ALLOWLIST = [
@@ -85,6 +87,17 @@ export interface OpenCodeEnvironmentOptions {
   databasePath?: string;
 }
 
+/** Resolve the existing Vertex auth proxy, keeping Google credentials off the agent. */
+export function resolveVertexProxyUrl(environment: NodeJS.ProcessEnv): string {
+  const explicit =
+    environment[OPENCODE_VERTEX_PROXY_URL_ENVIRONMENT]?.trim() ||
+    environment.ANTHROPIC_VERTEX_BASE_URL?.trim();
+  if (explicit) return explicit;
+
+  const host = environment.PROXY_HOST?.trim() || environment.PROXY_NAME?.trim() || "devbot-proxy";
+  return /^https?:\/\//i.test(host) ? host : `http://${host}:8443`;
+}
+
 export type OpenCodeFetch = (request: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
 /**
@@ -108,7 +121,11 @@ export function buildOpenCodeEnvironment(
       !BLOCKED_PASSTHROUGH.has(name) &&
       !BLOCKED_PASSTHROUGH_PREFIXES.some((prefix) => name.startsWith(prefix))
     ) {
-      copyIfPresent(environment, base, name);
+      if (name === OPENCODE_VERTEX_PROXY_URL_ENVIRONMENT) {
+        environment[name] = resolveVertexProxyUrl(base);
+      } else {
+        copyIfPresent(environment, base, name);
+      }
     }
   }
 
@@ -121,10 +138,16 @@ export function buildOpenCodeEnvironment(
   setProxyAlias(environment, "HTTPS_PROXY", "https_proxy", proxy.httpsProxy);
 
   const inheritedNoProxy = normalizeHosts(proxy.noProxy);
+  const vertexProxyHost = (options.passthrough ?? []).includes(
+    OPENCODE_VERTEX_PROXY_URL_ENVIRONMENT,
+  )
+    ? getHostname(resolveVertexProxyUrl(base))
+    : undefined;
   const noProxyHosts = [
     ...DEFAULT_NO_PROXY_HOSTS,
     ...(options.noProxyHosts ?? []),
     ...inheritedNoProxy,
+    ...(vertexProxyHost === undefined ? [] : [vertexProxyHost]),
   ];
   const noProxy = [...new Set(noProxyHosts.filter(Boolean))].join(",");
   environment.NO_PROXY = noProxy;
@@ -159,6 +182,14 @@ function setProxyAlias(
   }
   target[upper] = value;
   target[lower] = value;
+}
+
+function getHostname(value: string): string | undefined {
+  try {
+    return new URL(value).hostname;
+  } catch {
+    return undefined;
+  }
 }
 
 function normalizeHosts(value: string | readonly string[] | undefined): string[] {

@@ -75,6 +75,36 @@ exports[`OpenCode V1 config renderer > matches byte-for-byte snapshots for deplo
           "baseURL": "{env:REHOR_MODEL_PROXY_URL}",
         },
       },
+      "vertex": {
+        "models": {
+          "claude-haiku-4-5": {
+            "limit": {
+              "context": 200000,
+              "output": 8192,
+            },
+            "name": "Claude Haiku 4.5",
+          },
+          "claude-opus-4-6": {
+            "limit": {
+              "context": 200000,
+              "output": 8192,
+            },
+            "name": "Claude Opus 4.6",
+          },
+          "claude-sonnet-4-6": {
+            "limit": {
+              "context": 200000,
+              "output": 8192,
+            },
+            "name": "Claude Sonnet 4.6",
+          },
+        },
+        "name": "Claude on Vertex via Rehor proxy",
+        "npm": "<coordinator-vertex-provider>",
+        "options": {
+          "baseURL": "{env:REHOR_VERTEX_PROXY_URL}",
+        },
+      },
     },
     "share": "disabled",
   },

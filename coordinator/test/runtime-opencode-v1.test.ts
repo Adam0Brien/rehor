@@ -431,6 +431,8 @@ describe("OpenCode environment", () => {
         HTTP_PROXY: "http://proxy:3128",
         HTTPS_PROXY: "http://proxy:3128",
         NO_PROXY: "memory-server,proxy",
+        ANTHROPIC_VERTEX_BASE_URL: "http://proxy:8443",
+        GOOGLE_APPLICATION_CREDENTIALS: "/secrets/sa-key.json",
         SECRET_TOKEN: "must-not-leak",
         OPENCODE_CONFIG: "/ambient/opencode.json",
         OPENCODE_CONFIG_CONTENT: "ambient-config-must-not-leak",
@@ -440,12 +442,15 @@ describe("OpenCode environment", () => {
         NPM_CONFIG_REGISTRY: "https://registry.example.invalid",
         REHOR_MODEL_PROXY_URL: "http://proxy:8450/v1",
         REHOR_MODEL_PROXY_TOKEN: "explicitly-allowed",
+        REHOR_VERTEX_PROXY_URL: "http://proxy:8443",
         AWS_SECRET_ACCESS_KEY: "must-not-leak",
         DATABASE_URL: "must-not-leak",
       },
       passthrough: [
         "REHOR_MODEL_PROXY_URL",
         "REHOR_MODEL_PROXY_TOKEN",
+        "REHOR_VERTEX_PROXY_URL",
+        "GOOGLE_APPLICATION_CREDENTIALS",
         "OPENCODE_CONFIG",
         "OPENCODE_CONFIG_CONTENT",
         "OPENCODE_CONFIG_DIR",
@@ -467,12 +472,14 @@ describe("OpenCode environment", () => {
       https_proxy: "http://proxy:3128",
       REHOR_MODEL_PROXY_URL: "http://proxy:8450/v1",
       REHOR_MODEL_PROXY_TOKEN: "explicitly-allowed",
+      REHOR_VERTEX_PROXY_URL: "http://proxy:8443",
     });
     expect(environment.NO_PROXY).toContain("127.0.0.1");
     expect(environment.NO_PROXY).toContain("model-gateway");
     expect(environment.no_proxy).toBe(environment.NO_PROXY);
     expect(environment.SECRET_TOKEN).toBeUndefined();
     expect(environment.AWS_SECRET_ACCESS_KEY).toBeUndefined();
+    expect(environment.GOOGLE_APPLICATION_CREDENTIALS).toBeUndefined();
     expect(environment.DATABASE_URL).toBeUndefined();
     expect(environment.OPENCODE_CONFIG_CONTENT).toBeUndefined();
     expect(environment.OPENCODE_CONFIG).toBeUndefined();
@@ -480,6 +487,20 @@ describe("OpenCode environment", () => {
     expect(environment.OPENCODE_PERMISSION).toBeUndefined();
     expect(environment.NODE_OPTIONS).toBeUndefined();
     expect(environment.NPM_CONFIG_REGISTRY).toBeUndefined();
+  });
+
+  it("derives a Vertex proxy URL without passing credentials to OpenCode", () => {
+    const environment = buildOpenCodeEnvironment({
+      base: {
+        PROXY_NAME: "custom-devbot-proxy",
+        GOOGLE_APPLICATION_CREDENTIALS: "/secrets/sa-key.json",
+      },
+      passthrough: ["REHOR_VERTEX_PROXY_URL", "GOOGLE_APPLICATION_CREDENTIALS"],
+    });
+
+    expect(environment.REHOR_VERTEX_PROXY_URL).toBe("http://custom-devbot-proxy:8443");
+    expect(environment.NO_PROXY).toContain("custom-devbot-proxy");
+    expect(environment.GOOGLE_APPLICATION_CREDENTIALS).toBeUndefined();
   });
 
   it("keeps MCP endpoint references available without allowing arbitrary MCP variables", () => {

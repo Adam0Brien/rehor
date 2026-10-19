@@ -28,7 +28,7 @@ Supported combinations are:
 | Runtime | Provider | Role |
 |---|---|---|
 | `claude` | `vertex` | Legacy/default rollback path |
-| `opencode-v1` | `vertex` | OpenCode compatibility canary through Vertex; requires a deployment config that declares a `vertex` provider (the packaged defaults do not) |
+| `opencode-v1` | `vertex` | Claude on Vertex through the existing Rehor auth proxy |
 | `opencode-v1` | `rehor-openai` | OpenAI Responses route (`@ai-sdk/openai`), default model `gpt-6-luna` |
 | `opencode-v1` | `rehor-openai-chat` | OpenAI Chat Completions compatibility route (`@ai-sdk/openai-compatible`) |
 
@@ -41,6 +41,12 @@ configuration caps output at 16384 tokens.
 Set a model declared under `rehor-openai-chat` (for example `gpt-4.1`); an
 undeclared model fails before OpenCode starts.
 
+The packaged OpenCode defaults declare Vertex Claude Sonnet 4.6, Opus 4.6, and
+Haiku 4.5. The coordinator's Vertex adapter sends a placeholder bearer value to
+the proxy; proxy injects its Google service-account token and enforces
+`VERTEX_ALLOWED_MODELS`. The OpenCode child receives no Google ADC file or
+credential.
+
 Do not rely on a provider name embedded in a model string to select the
 runtime. Runtime and provider are separate fields so either can be rolled back
 without changing the other.
@@ -49,8 +55,8 @@ without changing the other.
 
 1. Confirm the target image includes `coordinator/dist/cli.js`, its locked Node
    dependencies, `/usr/local/bin/opencode` version `1.18.29`,
-   `@ai-sdk/openai@4.0.73`, `@ai-sdk/openai-compatible@3.0.54`, `zstd`, and the
-   configured provider gateway.
+   `@ai-sdk/openai@4.0.73`, `@ai-sdk/openai-compatible@3.0.54`,
+   `@ai-sdk/google-vertex@4.0.181`, `zstd`, and the configured provider proxies.
 2. Confirm the instance has a known-good Claude/Vertex deployment or revision
    available for rollback.
 3. Confirm the instance config contains no API keys. Credentials remain in

@@ -36,6 +36,8 @@ import {
   type RenderedOpenCodeV1Config,
 } from "./types";
 
+const VERTEX_PROXY_PROVIDER_MODULE_URL = new URL("./vertex-provider.js", import.meta.url).href;
+
 export function normalizeDeploymentConfig(
   deployment: OpenCodeV1DeploymentConfig,
 ): Omit<OpenCodeV1DeploymentConfig, "provider" | "packageLock"> {
@@ -59,15 +61,42 @@ export function renderOpenCodeV1ConfigForCycle(
   deployment: OpenCodeV1DeploymentConfig = {},
   projectConfig: OpenCodeProjectConfiguration = { settings: {}, files: [] },
 ): RenderedOpenCodeV1Config {
+  const resolvedProviderId = deployment.providerId ?? providerId;
+  const normalizedDeployment = normalizeDeploymentConfig(deployment);
+  const resolvedModel = deployment.model ?? preparation.model;
   const rendered = renderOpenCodeV1Config({
-    ...normalizeDeploymentConfig(deployment),
-    model: deployment.model ?? preparation.model,
-    providerId: deployment.providerId ?? providerId,
+    ...normalizedDeployment,
+    model: resolvedModel,
+    providerId: resolvedProviderId,
+    smallModel:
+      deployment.smallModel ??
+      defaultSmallModel(resolvedProviderId, resolvedModel, normalizedDeployment.providers ?? []),
     mcpServers: preparation.openCodeMcpServers,
     allowedTools: preparation.allowedTools ?? [],
     optionalMcpServers: preparation.optionalMcpServers ?? [],
   });
   return validateOpenCodeProjectConfig(rendered, projectConfig);
+}
+
+/** Keep title/utility model selection inside selected provider's declared models. */
+function defaultSmallModel(
+  providerId: string,
+  model: string,
+  providers: readonly OpenCodeProviderConfig[],
+): string | undefined {
+  const provider = providers.find((item) => item.id === providerId);
+  if (providerId === "vertex" && provider?.models?.["claude-sonnet-4-6"] !== undefined) {
+    return "vertex/claude-sonnet-4-6";
+  }
+  if (
+    providerId !== "vertex" &&
+    providerId !== "rehor-openai" &&
+    providerId !== "rehor-openai-chat"
+  ) {
+    return undefined;
+  }
+
+  return model.includes("/") ? model : `${providerId}/${model}`;
 }
 
 const BUILTIN_TOOLS = [
@@ -561,7 +590,12 @@ function renderProviders(
   const output: Record<string, JsonValue> = {};
   for (const provider of providers) {
     const entry: Record<string, JsonValue> = {};
-    if (provider.npm !== undefined) {
+    if (provider.id === "vertex") {
+      if (provider.npm !== undefined) {
+        throw new OpenCodeConfigValidationError(["provider.vertex.npm is coordinator-managed"]);
+      }
+      entry.npm = VERTEX_PROXY_PROVIDER_MODULE_URL;
+    } else if (provider.npm !== undefined) {
       entry.npm = pinPackageReference(
         provider.npm,
         packageLock,

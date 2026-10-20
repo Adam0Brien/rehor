@@ -97,7 +97,7 @@ provider: vertex
 | `envs` | list or null | `null` (all) | Env presets to activate. `null`/omitted = all available. `[]` = none. |
 | `claude_md.strategy` | string | `ignore` | How to handle instance CLAUDE.md: `ignore`, `append`, `replace`. |
 | `runtime` | string | `claude` | Runtime adapter: `claude` or `opencode-v1`. |
-| `provider` | string | Runtime-dependent | `vertex`, `rehor-openai` (native Responses), or `rehor-openai-chat` (Chat Completions). Defaults to `vertex` for Claude and `rehor-openai` for OpenCode. |
+| `provider` | string | Runtime-dependent | `vertex` (Claude via Vertex auth proxy), `rehor-openai` (native Responses), or `rehor-openai-chat` (Chat Completions). Defaults to `vertex` for Claude and `rehor-openai` for OpenCode. |
 | `model` | string or null | `null` | Optional model override (e.g. `claude-sonnet-4-6`). Must be allowed by the selected provider route. |
 
 `runtime` and `provider` are selected independently and passed to the TypeScript
@@ -105,7 +105,10 @@ coordinator. Supported combinations are `claude` + `vertex`, `opencode-v1` +
 `vertex`, `opencode-v1` + `rehor-openai` (native Responses), and
 `opencode-v1` + `rehor-openai-chat` (Chat Completions). OpenCode+`rehor-openai`
 uses `config.json`'s `opencode.model` (`gpt-6-luna`); OpenCode+Vertex preserves
-`claude.model`. Chat Completions requires a model declared under its provider.
+`claude.model` and uses the existing Vertex proxy. Chat Completions requires a
+model declared under its provider. OpenCode+Vertex supports the approved Claude
+Sonnet 4.6, Opus 4.6, and Haiku 4.5 model IDs; the proxy enforces
+`VERTEX_ALLOWED_MODELS` and owns the service-account credential.
 Invalid combinations fail validation. If
 omitted from `instance.yaml`, deployment operators can set `BOT_RUNTIME` and
 `BOT_PROVIDER`; the default remains the Claude/Vertex path. Keep that path
@@ -403,7 +406,7 @@ resourceTemplates:
       BOT_INSTANCE_ID: 'Your Bot Name'     # human-readable, used in memory server
       GCP_PROJECT_ID: your-gcp-project
       GCP_REGION: global
-      VERTEX_ALLOWED_MODELS: claude-sonnet-4-6,claude-opus-4-6,claude-haiku-4-5
+      VERTEX_ALLOWED_MODELS: claude-sonnet-4-6,claude-opus-4-6,claude-haiku-4-5,claude-haiku-4-5@20251001
       BOT_CONFIG_REPO: https://github.com/YourOrg/my-bot-instance.git
       BOT_CONFIG_PATH: instance/my-config
       # Optional, per deployment; requires the runner template to expose it:

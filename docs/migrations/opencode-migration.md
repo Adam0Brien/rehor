@@ -327,6 +327,17 @@ Example bot-side `opencode.json`:
           "limit": { "context": 128000, "output": 16384 }
         }
       }
+    },
+    "vertex": {
+      "name": "Claude on Vertex via Rehor proxy",
+      "options": {
+        "baseURL": "{env:REHOR_VERTEX_PROXY_URL}"
+      },
+      "models": {
+        "claude-sonnet-4-6": { "name": "Claude Sonnet 4.6" },
+        "claude-opus-4-6": { "name": "Claude Opus 4.6" },
+        "claude-haiku-4-5@20251001": { "name": "Claude Haiku 4.5" }
+      }
     }
   },
   "model": "rehor-openai/gpt-6-luna",
@@ -345,12 +356,26 @@ instead. These two adapters use versions bundled in the pinned OpenCode binary.
 The `4.0.73` and `3.0.54` package declarations remain build metadata, not runtime
 overrides of bundled versions; explicit requested versions must match those
 declarations. External provider packages and all plugins remain exact-pinned.
+The Vertex adapter is a coordinator-bundled file provider backed by the exact
+`@ai-sdk/google-vertex` dependency in the runner image.
 
 The OpenCode+`rehor-openai` default lives in `config.json` under
 `opencode.model` and is `gpt-6-luna`; OpenCode+Vertex and the Python/Claude/
 Vertex rollback keep `claude.model`. The Chat Completions provider requires an
 explicit declared model. Deployment allowlists, pricing, tool support, and
 regional requirements remain deployment-owned.
+
+OpenCode's `vertex` provider sends Vertex Anthropic `rawPredict` and
+`streamRawPredict` requests through the existing proxy. URL precedence is
+`REHOR_VERTEX_PROXY_URL`, `ANTHROPIC_VERTEX_BASE_URL`, `PROXY_HOST`/`PROXY_NAME`,
+then `http://devbot-proxy:8443`. It uses dummy
+project and region path segments because the proxy rewrites them to its
+configured `GCP_PROJECT_ID` and `GCP_REGION`. The adapter emits a placeholder
+bearer value; the proxy replaces it with its service-account token and applies
+`VERTEX_ALLOWED_MODELS`. Google credentials stay proxy-only. Coordinator uses
+Sonnet as small model only when it is declared and present in
+`VERTEX_ALLOWED_MODELS`; otherwise it uses the selected model for
+title-generation requests.
 
 ### [REHOR-144](https://issues.redhat.com/browse/REHOR-144) renderer contract
 
@@ -371,13 +396,15 @@ fallback to resolved Claude values. The renderer:
   for MCP servers explicitly marked optional by the prepared cycle;
 - converts provider/plugin `${VAR}` values to OpenCode `{env:VAR}` references
   only when `VAR` is in the explicit `OPENCODE_PROVIDER_ENVIRONMENT_ALLOWLIST`
-  (`REHOR_MODEL_PROXY_TOKEN` today), and returns required variables without
+  (`REHOR_MODEL_PROXY_URL`, `REHOR_MODEL_PROXY_TOKEN`, and
+  `REHOR_VERTEX_PROXY_URL`), and returns required variables without
   serializing resolved credentials; MCP URLs may reference only the non-secret
   `JIRA_MCP_URL` endpoint, while MCP headers and local MCP environments cannot
   use environment references;
 - rejects unknown tools, malformed transports, untrusted MCP environment
-  references, literal credentials, and undeclared package references; only the
-  two explicitly supported bundled provider adapters use bare npm names;
+  references, literal credentials, and undeclared package references; the two
+  OpenAI adapters use bundled npm names and Vertex uses a coordinator-owned
+  file provider;
 - emits stable JSON, a content hash, and
   `opencode-packages.lock.json` containing exact provider/plugin build
   declarations, without overriding the binary's bundled provider versions.

@@ -44,8 +44,19 @@ describe("OpenCode V1 config renderer", () => {
     );
 
     const [defaultRendered, exampleRendered] = rendered;
+    const snapshotConfig = JSON.parse(JSON.stringify(defaultRendered.config)) as Record<
+      string,
+      unknown
+    >;
+    const providers = snapshotConfig.provider;
+    if (providers && typeof providers === "object" && !Array.isArray(providers)) {
+      const vertex = (providers as Record<string, unknown>).vertex;
+      if (vertex && typeof vertex === "object" && !Array.isArray(vertex)) {
+        (vertex as Record<string, unknown>).npm = "<coordinator-vertex-provider>";
+      }
+    }
     expect({
-      config: defaultRendered.config,
+      config: snapshotConfig,
       packageLock: defaultRendered.packageLock,
     }).toMatchSnapshot();
     expect(defaultRendered.json).toBe(`${stableJson(defaultRendered.config)}\n`);

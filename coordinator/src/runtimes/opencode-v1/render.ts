@@ -15,6 +15,7 @@ import {
   parseEnvironmentReferences,
   rejectMcpEnvironmentReference,
 } from "./env-refs";
+import { resolveDefaultSmallModel } from "./model-defaults";
 import { normalizePackageLock, pinPackageReference } from "./packages";
 import {
   isSafeOpenCodeProjectFilePath,
@@ -35,6 +36,8 @@ import {
   type OpenCodeV1DeploymentConfig,
   type RenderedOpenCodeV1Config,
 } from "./types";
+
+const VERTEX_PROXY_PROVIDER_MODULE_URL = new URL("./vertex-provider.js", import.meta.url).href;
 
 export function normalizeDeploymentConfig(
   deployment: OpenCodeV1DeploymentConfig,
@@ -58,11 +61,23 @@ export function renderOpenCodeV1ConfigForCycle(
   providerId: string,
   deployment: OpenCodeV1DeploymentConfig = {},
   projectConfig: OpenCodeProjectConfiguration = { settings: {}, files: [] },
+  vertexAllowedModels: readonly string[] = [],
 ): RenderedOpenCodeV1Config {
+  const resolvedProviderId = deployment.providerId ?? providerId;
+  const normalizedDeployment = normalizeDeploymentConfig(deployment);
+  const resolvedModel = deployment.model ?? preparation.model;
   const rendered = renderOpenCodeV1Config({
-    ...normalizeDeploymentConfig(deployment),
-    model: deployment.model ?? preparation.model,
-    providerId: deployment.providerId ?? providerId,
+    ...normalizedDeployment,
+    model: resolvedModel,
+    providerId: resolvedProviderId,
+    smallModel:
+      deployment.smallModel ??
+      resolveDefaultSmallModel(
+        resolvedProviderId,
+        resolvedModel,
+        normalizedDeployment.providers ?? [],
+        vertexAllowedModels,
+      ),
     mcpServers: preparation.openCodeMcpServers,
     allowedTools: preparation.allowedTools ?? [],
     optionalMcpServers: preparation.optionalMcpServers ?? [],
@@ -561,7 +576,12 @@ function renderProviders(
   const output: Record<string, JsonValue> = {};
   for (const provider of providers) {
     const entry: Record<string, JsonValue> = {};
-    if (provider.npm !== undefined) {
+    if (provider.id === "vertex") {
+      if (provider.npm !== undefined) {
+        throw new OpenCodeConfigValidationError(["provider.vertex.npm is coordinator-managed"]);
+      }
+      entry.npm = VERTEX_PROXY_PROVIDER_MODULE_URL;
+    } else if (provider.npm !== undefined) {
       entry.npm = pinPackageReference(
         provider.npm,
         packageLock,

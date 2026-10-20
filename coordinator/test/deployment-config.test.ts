@@ -8,6 +8,7 @@ import { loadOpenCodeDeploymentConfig, renderOpenCodeV1ConfigForCycle } from "..
 import type { PreparedCycleInput } from "../src/cycle-input";
 import { InstructionStrategy } from "../src/instructions";
 import { validateOpenCodeDeployment } from "../src/runner";
+import { parseVertexAllowedModels } from "../src/runtimes/opencode-v1/model-defaults";
 
 const temporaryDirectories: string[] = [];
 
@@ -50,6 +51,9 @@ const prepared: PreparedCycleInput = {
 const gatewayEnvironment = {
   REHOR_MODEL_PROXY_URL: "http://proxy:8450/v1",
   REHOR_MODEL_PROXY_TOKEN: "test-proxy-token",
+  ANTHROPIC_VERTEX_BASE_URL: "http://proxy:8443",
+  VERTEX_ALLOWED_MODELS:
+    "claude-sonnet-4-6,claude-opus-4-6,claude-haiku-4-5,claude-haiku-4-5@20251001",
 };
 
 afterEach(async () => {
@@ -74,6 +78,11 @@ describe("OpenCode deployment defaults", () => {
           id: "rehor-openai-chat",
           models: expect.objectContaining({ "gpt-4.1": expect.any(Object) }),
         }),
+        expect.objectContaining({
+          id: "vertex",
+          options: { baseURL: "{env:REHOR_VERTEX_PROXY_URL}" },
+          models: expect.objectContaining({ "claude-opus-4-6": expect.any(Object) }),
+        }),
       ]),
     );
 
@@ -83,9 +92,11 @@ describe("OpenCode deployment defaults", () => {
       deployment,
     );
     expect(defaultRendered.config.model).toBe("rehor-openai/gpt-6-luna");
+    expect(defaultRendered.config.small_model).toBe("rehor-openai/gpt-6-luna");
     expect(defaultRendered.requiredEnvironment).toEqual([
       "REHOR_MODEL_PROXY_TOKEN",
       "REHOR_MODEL_PROXY_URL",
+      "REHOR_VERTEX_PROXY_URL",
     ]);
     expect(() =>
       validateOpenCodeDeployment(prepared, deployment, gatewayEnvironment),
@@ -110,6 +121,147 @@ describe("OpenCode deployment defaults", () => {
       ),
     ).not.toThrow();
     expect(deployment).not.toHaveProperty("model");
+  });
+
+  it("renders OpenCode Vertex Claude through the proxy without Google credentials", async () => {
+    const deployment = await loadOpenCodeDeploymentConfig(undefined);
+    const vertexConfig = {
+      ...prepared.config,
+      model: "claude-opus-4-6",
+      providerId: "vertex",
+    };
+    const rendered = renderOpenCodeV1ConfigForCycle(
+      vertexConfig,
+      "vertex",
+      deployment,
+      undefined,
+      parseVertexAllowedModels(gatewayEnvironment.VERTEX_ALLOWED_MODELS),
+    );
+
+    expect(rendered.config).toMatchObject({
+      model: "vertex/claude-opus-4-6",
+      small_model: "vertex/claude-sonnet-4-6",
+      enabled_providers: ["vertex"],
+      provider: {
+        vertex: {
+          npm: expect.stringMatching(/^file:.*vertex-provider\.js$/),
+          options: { baseURL: "{env:REHOR_VERTEX_PROXY_URL}" },
+          models: expect.objectContaining({
+            "claude-opus-4-6": expect.any(Object),
+            "claude-sonnet-4-6": expect.any(Object),
+            "claude-haiku-4-5@20251001": expect.any(Object),
+          }),
+        },
+      },
+    });
+    expect(rendered.requiredEnvironment).toContain("REHOR_VERTEX_PROXY_URL");
+    expect(rendered.json).not.toContain("GOOGLE_APPLICATION_CREDENTIALS");
+    expect(() =>
+      validateOpenCodeDeployment(
+        { ...prepared, config: vertexConfig },
+        deployment,
+        gatewayEnvironment,
+      ),
+    ).not.toThrow();
+  });
+
+  it("rejects Vertex deployments that bypass proxy URL or use an invalid endpoint", async () => {
+    const deployment = await loadOpenCodeDeploymentConfig(undefined);
+    const vertexConfig = { ...prepared.config, model: "claude-opus-4-6", providerId: "vertex" };
+
+    expect(() =>
+      validateOpenCodeDeployment({ ...prepared, config: vertexConfig }, deployment, {
+        ...gatewayEnvironment,
+        ANTHROPIC_VERTEX_BASE_URL: "https://aiplatform.googleapis.com",
+      }),
+    ).toThrow("proxy URL must be http://<proxy-host>:8443");
+
+    const bypassDeployment = {
+      ...deployment,
+      providers: deployment.providers?.map((provider) =>
+        provider.id === "vertex"
+          ? { ...provider, options: { baseURL: "https://aiplatform.googleapis.com" } }
+          : provider,
+      ),
+    };
+    expect(() =>
+      validateOpenCodeDeployment(
+        { ...prepared, config: vertexConfig },
+        bypassDeployment,
+        gatewayEnvironment,
+      ),
+    ).toThrow("baseURL must reference REHOR_VERTEX_PROXY_URL");
+  });
+
+  it("fails fast when Vertex model selection is outside deployment allowlist", async () => {
+    const deployment = await loadOpenCodeDeploymentConfig(undefined);
+    const vertexConfig = { ...prepared.config, model: "claude-opus-4-6", providerId: "vertex" };
+
+    expect(() =>
+      validateOpenCodeDeployment({ ...prepared, config: vertexConfig }, deployment, {
+        ...gatewayEnvironment,
+        VERTEX_ALLOWED_MODELS: "claude-sonnet-4-6",
+      }),
+    ).toThrow("not in VERTEX_ALLOWED_MODELS");
+    expect(() =>
+      validateOpenCodeDeployment(
+        { ...prepared, config: { ...vertexConfig, model: "claude-opus-4-7" } },
+        deployment,
+        gatewayEnvironment,
+      ),
+    ).toThrow("does not declare prepared model 'claude-opus-4-7'");
+    expect(() =>
+      validateOpenCodeDeployment({ ...prepared, config: vertexConfig }, deployment, {
+        ...gatewayEnvironment,
+        VERTEX_ALLOWED_MODELS: "",
+      }),
+    ).toThrow("requires VERTEX_ALLOWED_MODELS");
+  });
+
+  it("falls back to selected Vertex model when Sonnet is outside the allowlist", async () => {
+    const deployment = await loadOpenCodeDeploymentConfig(undefined);
+    const vertexConfig = {
+      ...prepared.config,
+      model: "claude-opus-4-6",
+      providerId: "vertex",
+    };
+    const opusOnlyEnvironment = {
+      ...gatewayEnvironment,
+      VERTEX_ALLOWED_MODELS: "claude-opus-4-6",
+    };
+    const rendered = renderOpenCodeV1ConfigForCycle(
+      vertexConfig,
+      "vertex",
+      deployment,
+      undefined,
+      parseVertexAllowedModels(opusOnlyEnvironment.VERTEX_ALLOWED_MODELS),
+    );
+
+    expect(rendered.config.small_model).toBe("vertex/claude-opus-4-6");
+    expect(() =>
+      validateOpenCodeDeployment(
+        { ...prepared, config: vertexConfig },
+        deployment,
+        opusOnlyEnvironment,
+      ),
+    ).not.toThrow();
+  });
+
+  it("rejects an explicitly configured Vertex small model outside the allowlist", async () => {
+    const deployment = await loadOpenCodeDeploymentConfig(undefined);
+    const vertexConfig = {
+      ...prepared.config,
+      model: "claude-opus-4-6",
+      providerId: "vertex",
+    };
+    const smallSonnetDeployment = { ...deployment, smallModel: "vertex/claude-sonnet-4-6" };
+
+    expect(() =>
+      validateOpenCodeDeployment({ ...prepared, config: vertexConfig }, smallSonnetDeployment, {
+        ...gatewayEnvironment,
+        VERTEX_ALLOWED_MODELS: "claude-opus-4-6",
+      }),
+    ).toThrow("small model 'claude-sonnet-4-6' is not in VERTEX_ALLOWED_MODELS");
   });
 
   it("keeps REHOR_OPENCODE_DEPLOYMENT_CONFIG as an explicit file override", async () => {

@@ -18,6 +18,7 @@ import {
   type RenderedOpenCodeV1Config,
   renderOpenCodeV1ConfigForCycle,
 } from "./runtimes/opencode-v1";
+import { parseVertexAllowedModels } from "./runtimes/opencode-v1/model-defaults";
 
 export const DEFAULT_RUNTIME_ID = "claude";
 
@@ -125,6 +126,7 @@ export function createOpenCodeV1RuntimeFactory(
           context.run.provider.id,
           configured,
           context.nativeConfig,
+          parseVertexAllowedModels((options.base ?? process.env).VERTEX_ALLOWED_MODELS),
         );
       } catch (error) {
         renderError = error;

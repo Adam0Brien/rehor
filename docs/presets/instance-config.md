@@ -42,7 +42,7 @@ model: claude-sonnet-4-6
 | `claude_md.strategy` | `ignore` | `ignore`, `append`, or `replace` for instance `CLAUDE.md` |
 | `idle_cycle_limit` | `0` | Optional idle-cycle reminder threshold; `0` disables it |
 | `runtime` | `claude` | Runtime adapter: `claude` or `opencode-v1` |
-| `provider` | Runtime-dependent | `vertex`, `rehor-openai` (native Responses), or `rehor-openai-chat` (Chat Completions). Defaults to `vertex` for Claude and `rehor-openai` for OpenCode. |
+| `provider` | Runtime-dependent | `vertex` (Claude on Vertex through the auth proxy), `rehor-openai` (native Responses), or `rehor-openai-chat` (Chat Completions). Defaults to `vertex` for Claude and `rehor-openai` for OpenCode. |
 | `model` | `null` | Optional model override. Claude/Vertex and OpenCode/Vertex use `claude.model`; OpenCode/`rehor-openai` uses `opencode.model`; Chat Completions requires an explicit model. |
 
 ## Runtime and Provider Selection
@@ -53,16 +53,25 @@ preparation into the TypeScript coordinator. Supported pairs are:
 | Runtime | Providers | Use |
 |---|---|---|
 | `claude` | `vertex` | Existing rollback/default path |
-| `opencode-v1` | `vertex` | OpenCode compatibility canary through the Vertex route; requires a deployment config that declares a `vertex` provider (the packaged defaults do not) |
+| `opencode-v1` | `vertex` | Claude on Vertex through the existing auth proxy; available in packaged defaults |
 | `opencode-v1` | `rehor-openai` | Native OpenAI Responses route; default model is GPT-6 Luna |
 | `opencode-v1` | `rehor-openai-chat` | OpenAI-compatible Chat Completions route; model must be declared under this provider |
 
 Unsupported IDs and either `claude`/OpenAI-provider combination fail
-validation. When the keys are omitted from `instance.yaml`, `BOT_RUNTIME` and
-`BOT_PROVIDER` provide deployment-level defaults; absent an explicit provider,
-OpenCode selects `rehor-openai` while Claude remains `vertex`. Keep the existing Python/Claude/Vertex deployment available
-until the canary gates in the [OpenCode rollout runbook](../operations/rehor-146-opencode-canary.md)
-pass.
+validation. OpenCode's `vertex` adapter sends a placeholder bearer value to
+`ANTHROPIC_VERTEX_BASE_URL`; the proxy replaces it with its service-account
+token. The key and Google ADC credentials stay on the proxy. The runner supplies
+the existing proxy URL without exposing Google credentials to OpenCode. URL
+precedence is `REHOR_VERTEX_PROXY_URL`, `ANTHROPIC_VERTEX_BASE_URL`, then
+`PROXY_HOST`/`PROXY_NAME`, with `http://devbot-proxy:8443` as final default.
+For OpenCode Vertex deployments, `VERTEX_ALLOWED_MODELS` must be set on both
+bot and proxy: coordinator validates selected and utility models; proxy
+enforces the allowlist on Vertex requests. When `runtime` and `provider` are
+omitted from `instance.yaml`, `BOT_RUNTIME` and `BOT_PROVIDER` provide
+deployment-level defaults; absent an explicit provider, OpenCode selects
+`rehor-openai` while Claude remains `vertex`. Keep the existing
+Python/Claude/Vertex deployment available until the canary gates in the
+[OpenCode rollout runbook](../operations/rehor-146-opencode-canary.md) pass.
 
 `BOT_EXECUTION_ENGINE` is separate: it is a runner-deployment environment
 setting, not an `instance.yaml` field. Omitted or `python` (default) launches

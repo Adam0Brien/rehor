@@ -39,6 +39,36 @@
           }
         }
       }
+    },
+    {
+      "id": "vertex",
+      "name": "Claude on Vertex via Rehor proxy",
+      "options": {
+        "baseURL": "{env:REHOR_VERTEX_PROXY_URL}"
+      },
+      "models": {
+        "claude-sonnet-4-6": {
+          "name": "Claude Sonnet 4.6",
+          "limit": {
+            "context": 200000,
+            "output": 32000
+          }
+        },
+        "claude-opus-4-6": {
+          "name": "Claude Opus 4.6",
+          "limit": {
+            "context": 200000,
+            "output": 32000
+          }
+        },
+        "claude-haiku-4-5@20251001": {
+          "name": "Claude Haiku 4.5",
+          "limit": {
+            "context": 200000,
+            "output": 32000
+          }
+        }
+      }
     }
   ],
   "packages": [

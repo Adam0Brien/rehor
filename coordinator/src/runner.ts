@@ -29,6 +29,14 @@ import type {
   OpenCodeV1DeploymentConfig,
 } from "./runtimes/opencode-v1";
 import {
+  OPENCODE_VERTEX_PROXY_URL_ENVIRONMENT,
+  resolveVertexProxyUrl,
+} from "./runtimes/opencode-v1/environment";
+import {
+  parseVertexAllowedModels,
+  resolveDefaultSmallModel,
+} from "./runtimes/opencode-v1/model-defaults";
+import {
   normalizeDeploymentConfig,
   renderOpenCodeV1ConfigForCycle,
 } from "./runtimes/opencode-v1/render";
@@ -164,18 +172,90 @@ export function validateOpenCodeDeployment(
         "REHOR_OPENCODE_DEPLOYMENT_CONFIG) that declares it",
     );
   }
-  if (selectedProvider.id === "rehor-openai-chat") {
+  if (selectedProvider.id === "rehor-openai-chat" || selectedProvider.id === "vertex") {
     const modelId = prepared.config.model.slice(prepared.config.model.lastIndexOf("/") + 1);
     if (selectedProvider.models?.[modelId] === undefined) {
       throw new Error(
         `OpenCode deployment provider '${selectedProvider.id}' does not declare prepared model '${modelId}'`,
       );
     }
+    if (selectedProvider.id === "vertex") {
+      const allowedModels = parseVertexAllowedModels(environment.VERTEX_ALLOWED_MODELS);
+      if (allowedModels.length === 0) {
+        throw new Error("OpenCode Vertex provider requires VERTEX_ALLOWED_MODELS");
+      }
+      if (!allowedModels.includes(modelId)) {
+        throw new Error(`OpenCode Vertex model '${modelId}' is not in VERTEX_ALLOWED_MODELS`);
+      }
+      const smallModel =
+        deployment.smallModel ??
+        resolveDefaultSmallModel(
+          selectedProvider.id,
+          prepared.config.model,
+          providers,
+          allowedModels,
+        ) ??
+        prepared.config.model;
+      const smallModelId = smallModel.slice(smallModel.lastIndexOf("/") + 1);
+      if (smallModelId !== modelId && selectedProvider.models?.[smallModelId] === undefined) {
+        throw new Error(`OpenCode Vertex provider does not declare small model '${smallModelId}'`);
+      }
+      if (!allowedModels.includes(smallModelId)) {
+        throw new Error(
+          `OpenCode Vertex small model '${smallModelId}' is not in VERTEX_ALLOWED_MODELS`,
+        );
+      }
+    }
   }
   if (selectedProvider.id === "rehor-openai" || selectedProvider.id === "rehor-openai-chat") {
     validateOpenAIGatewayConfig(selectedProvider, environment);
   }
-  renderOpenCodeV1ConfigForCycle(prepared.config, prepared.config.providerId, deployment);
+  if (selectedProvider.id === "vertex") {
+    validateVertexProxyConfig(selectedProvider, environment);
+  }
+  renderOpenCodeV1ConfigForCycle(
+    prepared.config,
+    prepared.config.providerId,
+    deployment,
+    undefined,
+    parseVertexAllowedModels(environment.VERTEX_ALLOWED_MODELS),
+  );
+}
+
+function validateVertexProxyConfig(
+  provider: OpenCodeProviderConfig,
+  environment: NodeJS.ProcessEnv,
+): void {
+  if (
+    exactEnvironmentReference(provider.options?.baseURL) !== OPENCODE_VERTEX_PROXY_URL_ENVIRONMENT
+  ) {
+    throw new Error(
+      `OpenCode deployment provider '${provider.id}' baseURL must reference ${OPENCODE_VERTEX_PROXY_URL_ENVIRONMENT}`,
+    );
+  }
+
+  let parsedProxy: URL;
+  try {
+    parsedProxy = new URL(resolveVertexProxyUrl(environment));
+  } catch {
+    throw new Error(
+      `OpenCode deployment provider '${provider.id}' has an invalid Vertex proxy URL`,
+    );
+  }
+  if (
+    parsedProxy.protocol !== "http:" ||
+    !parsedProxy.hostname ||
+    parsedProxy.port !== "8443" ||
+    (parsedProxy.pathname !== "" && parsedProxy.pathname !== "/") ||
+    parsedProxy.username ||
+    parsedProxy.password ||
+    parsedProxy.search ||
+    parsedProxy.hash
+  ) {
+    throw new Error(
+      `OpenCode deployment provider '${provider.id}' proxy URL must be http://<proxy-host>:8443`,
+    );
+  }
 }
 
 function validateOpenAIGatewayConfig(

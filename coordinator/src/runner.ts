@@ -33,6 +33,10 @@ import {
   resolveVertexProxyUrl,
 } from "./runtimes/opencode-v1/environment";
 import {
+  parseVertexAllowedModels,
+  resolveDefaultSmallModel,
+} from "./runtimes/opencode-v1/model-defaults";
+import {
   normalizeDeploymentConfig,
   renderOpenCodeV1ConfigForCycle,
 } from "./runtimes/opencode-v1/render";
@@ -176,21 +180,22 @@ export function validateOpenCodeDeployment(
       );
     }
     if (selectedProvider.id === "vertex") {
-      const allowedModels = (environment.VERTEX_ALLOWED_MODELS ?? "")
-        .split(",")
-        .map((model) => model.trim())
-        .filter(Boolean);
+      const allowedModels = parseVertexAllowedModels(environment.VERTEX_ALLOWED_MODELS);
       if (allowedModels.length === 0) {
         throw new Error("OpenCode Vertex provider requires VERTEX_ALLOWED_MODELS");
       }
       if (!allowedModels.includes(modelId)) {
         throw new Error(`OpenCode Vertex model '${modelId}' is not in VERTEX_ALLOWED_MODELS`);
       }
-      const defaultSmallModel =
-        selectedProvider.models?.["claude-sonnet-4-6"] === undefined
-          ? prepared.config.model
-          : "vertex/claude-sonnet-4-6";
-      const smallModel = deployment.smallModel ?? defaultSmallModel;
+      const smallModel =
+        deployment.smallModel ??
+        resolveDefaultSmallModel(
+          selectedProvider.id,
+          prepared.config.model,
+          providers,
+          allowedModels,
+        ) ??
+        prepared.config.model;
       const smallModelId = smallModel.slice(smallModel.lastIndexOf("/") + 1);
       if (smallModelId !== modelId && selectedProvider.models?.[smallModelId] === undefined) {
         throw new Error(`OpenCode Vertex provider does not declare small model '${smallModelId}'`);
@@ -208,7 +213,13 @@ export function validateOpenCodeDeployment(
   if (selectedProvider.id === "vertex") {
     validateVertexProxyConfig(selectedProvider, environment);
   }
-  renderOpenCodeV1ConfigForCycle(prepared.config, prepared.config.providerId, deployment);
+  renderOpenCodeV1ConfigForCycle(
+    prepared.config,
+    prepared.config.providerId,
+    deployment,
+    undefined,
+    parseVertexAllowedModels(environment.VERTEX_ALLOWED_MODELS),
+  );
 }
 
 function validateVertexProxyConfig(

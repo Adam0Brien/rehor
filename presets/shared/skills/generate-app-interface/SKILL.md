@@ -40,7 +40,7 @@ Creates a SaaS deploy file in the `<app_interface_repo_path>` (a clone of app-in
   "slack_notify_mode": "",
   "gcp_project_id": "my-gcp-project",
   "gcp_region": "global",
-  "vertex_allowed_models": "claude-sonnet-4-6,claude-opus-4-6,claude-haiku-4-5",
+  "vertex_allowed_models": "claude-sonnet-4-6,claude-opus-4-6,claude-haiku-4-5,claude-haiku-4-5@20251001",
   "target_branch": "main",
   "pattern": "shared",
   "service_tree": "my-platform/my-team",
@@ -67,7 +67,7 @@ Creates a SaaS deploy file in the `<app_interface_repo_path>` (a clone of app-in
 |-------|----------|---------|-------|
 | `gcp_project_id` | separate only | discovered | Auto-discovered from shared deploy.yml for `shared` pattern |
 | `gcp_region` | no | `global` | |
-| `vertex_allowed_models` | no | `claude-sonnet-4-6,claude-opus-4-6,claude-haiku-4-5` | |
+| `vertex_allowed_models` | no | `claude-sonnet-4-6,claude-opus-4-6,claude-haiku-4-5,claude-haiku-4-5@20251001` | |
 | `pattern` | no | `shared` | `shared` creates file in shared service tree; `separate` creates in team's service tree |
 | `service_tree` | separate only | — | Path under `data/services/` (e.g., `my-platform/my-team`) |
 | `config_repo` | no | `repo_url` | Used as-is — no `.git` suffix auto-added |

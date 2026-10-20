@@ -419,7 +419,7 @@ The bot's Claude Code SDK is configured with:
 The proxy:
 - Decodes the SA key from `GOOGLE_SA_KEY_B64` at startup
 - Uses `golang.org/x/oauth2/google.FindDefaultCredentials` for automatic token management (caches tokens, auto-refreshes before expiry)
-- Enforces a model allowlist via `VERTEX_ALLOWED_MODELS` env var (e.g. `claude-sonnet-4-6,claude-opus-4-6,claude-haiku-4-5`)
+- Enforces a model allowlist via `VERTEX_ALLOWED_MODELS` env var (e.g. `claude-sonnet-4-6,claude-opus-4-6,claude-haiku-4-5,claude-haiku-4-5@20251001`)
 - Returns 403 for models not in the allowlist
 - Logs model, method, status, and duration for every request
 - Runs inside the same `executor-server` binary (no separate process)

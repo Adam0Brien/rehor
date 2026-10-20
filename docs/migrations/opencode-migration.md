@@ -336,7 +336,7 @@ Example bot-side `opencode.json`:
       "models": {
         "claude-sonnet-4-6": { "name": "Claude Sonnet 4.6" },
         "claude-opus-4-6": { "name": "Claude Opus 4.6" },
-        "claude-haiku-4-5": { "name": "Claude Haiku 4.5" }
+        "claude-haiku-4-5@20251001": { "name": "Claude Haiku 4.5" }
       }
     }
   },
@@ -366,14 +366,16 @@ explicit declared model. Deployment allowlists, pricing, tool support, and
 regional requirements remain deployment-owned.
 
 OpenCode's `vertex` provider sends Vertex Anthropic `rawPredict` and
-`streamRawPredict` requests through the existing proxy at
-`ANTHROPIC_VERTEX_BASE_URL` (default `http://devbot-proxy:8443`). It uses dummy
+`streamRawPredict` requests through the existing proxy. URL precedence is
+`REHOR_VERTEX_PROXY_URL`, `ANTHROPIC_VERTEX_BASE_URL`, `PROXY_HOST`/`PROXY_NAME`,
+then `http://devbot-proxy:8443`. It uses dummy
 project and region path segments because the proxy rewrites them to its
 configured `GCP_PROJECT_ID` and `GCP_REGION`. The adapter emits a placeholder
 bearer value; the proxy replaces it with its service-account token and applies
-`VERTEX_ALLOWED_MODELS`. Google credentials stay proxy-only. Coordinator sets a
-small model from the selected provider's declared model set so title-generation
-requests do not fall back to an unapproved model.
+`VERTEX_ALLOWED_MODELS`. Google credentials stay proxy-only. Coordinator uses
+Sonnet as small model only when it is declared and present in
+`VERTEX_ALLOWED_MODELS`; otherwise it uses the selected model for
+title-generation requests.
 
 ### [REHOR-144](https://issues.redhat.com/browse/REHOR-144) renderer contract
 

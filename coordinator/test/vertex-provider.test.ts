@@ -11,7 +11,7 @@ describe("Vertex proxy provider adapter", () => {
 
       expect(provider.languageModel("claude-opus-4-6")).toBeDefined();
       expect(provider.languageModel("claude-sonnet-4-6")).toBeDefined();
-      expect(provider.languageModel("claude-haiku-4-5")).toBeDefined();
+      expect(provider.languageModel("claude-haiku-4-5@20251001")).toBeDefined();
     } finally {
       if (previousCredentials === undefined) delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
       else process.env.GOOGLE_APPLICATION_CREDENTIALS = previousCredentials;

@@ -56,7 +56,7 @@ JIRA_API_TOKEN=your-jira-api-token
 # Use personal application-default credentials locally, or a service account
 # key for deployments. See SETUP.md for both flows.
 GOOGLE_SA_KEY_B64=$(base64 < sa-key.json)
-VERTEX_ALLOWED_MODELS=claude-sonnet-4-6,claude-opus-4-6,claude-haiku-4-5
+VERTEX_ALLOWED_MODELS=claude-sonnet-4-6,claude-opus-4-6,claude-haiku-4-5,claude-haiku-4-5@20251001
 
 # GitHub — bot PAT for gh CLI
 GH_TOKEN=ghp_...

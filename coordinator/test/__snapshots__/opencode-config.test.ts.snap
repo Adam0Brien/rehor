@@ -77,24 +77,24 @@ exports[`OpenCode V1 config renderer > matches byte-for-byte snapshots for deplo
       },
       "vertex": {
         "models": {
-          "claude-haiku-4-5": {
+          "claude-haiku-4-5@20251001": {
             "limit": {
               "context": 200000,
-              "output": 8192,
+              "output": 32000,
             },
             "name": "Claude Haiku 4.5",
           },
           "claude-opus-4-6": {
             "limit": {
               "context": 200000,
-              "output": 8192,
+              "output": 32000,
             },
             "name": "Claude Opus 4.6",
           },
           "claude-sonnet-4-6": {
             "limit": {
               "context": 200000,
-              "output": 8192,
+              "output": 32000,
             },
             "name": "Claude Sonnet 4.6",
           },

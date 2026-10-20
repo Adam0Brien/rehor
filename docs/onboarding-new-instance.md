@@ -406,7 +406,7 @@ resourceTemplates:
       BOT_INSTANCE_ID: 'Your Bot Name'     # human-readable, used in memory server
       GCP_PROJECT_ID: your-gcp-project
       GCP_REGION: global
-      VERTEX_ALLOWED_MODELS: claude-sonnet-4-6,claude-opus-4-6,claude-haiku-4-5
+      VERTEX_ALLOWED_MODELS: claude-sonnet-4-6,claude-opus-4-6,claude-haiku-4-5,claude-haiku-4-5@20251001
       BOT_CONFIG_REPO: https://github.com/YourOrg/my-bot-instance.git
       BOT_CONFIG_PATH: instance/my-config
       # Optional, per deployment; requires the runner template to expose it:

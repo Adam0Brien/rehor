@@ -15,6 +15,7 @@ import {
   parseEnvironmentReferences,
   rejectMcpEnvironmentReference,
 } from "./env-refs";
+import { resolveDefaultSmallModel } from "./model-defaults";
 import { normalizePackageLock, pinPackageReference } from "./packages";
 import {
   isSafeOpenCodeProjectFilePath,
@@ -60,6 +61,7 @@ export function renderOpenCodeV1ConfigForCycle(
   providerId: string,
   deployment: OpenCodeV1DeploymentConfig = {},
   projectConfig: OpenCodeProjectConfiguration = { settings: {}, files: [] },
+  vertexAllowedModels: readonly string[] = [],
 ): RenderedOpenCodeV1Config {
   const resolvedProviderId = deployment.providerId ?? providerId;
   const normalizedDeployment = normalizeDeploymentConfig(deployment);
@@ -70,33 +72,17 @@ export function renderOpenCodeV1ConfigForCycle(
     providerId: resolvedProviderId,
     smallModel:
       deployment.smallModel ??
-      defaultSmallModel(resolvedProviderId, resolvedModel, normalizedDeployment.providers ?? []),
+      resolveDefaultSmallModel(
+        resolvedProviderId,
+        resolvedModel,
+        normalizedDeployment.providers ?? [],
+        vertexAllowedModels,
+      ),
     mcpServers: preparation.openCodeMcpServers,
     allowedTools: preparation.allowedTools ?? [],
     optionalMcpServers: preparation.optionalMcpServers ?? [],
   });
   return validateOpenCodeProjectConfig(rendered, projectConfig);
-}
-
-/** Keep title/utility model selection inside selected provider's declared models. */
-function defaultSmallModel(
-  providerId: string,
-  model: string,
-  providers: readonly OpenCodeProviderConfig[],
-): string | undefined {
-  const provider = providers.find((item) => item.id === providerId);
-  if (providerId === "vertex" && provider?.models?.["claude-sonnet-4-6"] !== undefined) {
-    return "vertex/claude-sonnet-4-6";
-  }
-  if (
-    providerId !== "vertex" &&
-    providerId !== "rehor-openai" &&
-    providerId !== "rehor-openai-chat"
-  ) {
-    return undefined;
-  }
-
-  return model.includes("/") ? model : `${providerId}/${model}`;
 }
 
 const BUILTIN_TOOLS = [

@@ -8,6 +8,7 @@ import { loadOpenCodeDeploymentConfig, renderOpenCodeV1ConfigForCycle } from "..
 import type { PreparedCycleInput } from "../src/cycle-input";
 import { InstructionStrategy } from "../src/instructions";
 import { validateOpenCodeDeployment } from "../src/runner";
+import { parseVertexAllowedModels } from "../src/runtimes/opencode-v1/model-defaults";
 
 const temporaryDirectories: string[] = [];
 
@@ -51,7 +52,8 @@ const gatewayEnvironment = {
   REHOR_MODEL_PROXY_URL: "http://proxy:8450/v1",
   REHOR_MODEL_PROXY_TOKEN: "test-proxy-token",
   ANTHROPIC_VERTEX_BASE_URL: "http://proxy:8443",
-  VERTEX_ALLOWED_MODELS: "claude-sonnet-4-6,claude-opus-4-6,claude-haiku-4-5",
+  VERTEX_ALLOWED_MODELS:
+    "claude-sonnet-4-6,claude-opus-4-6,claude-haiku-4-5,claude-haiku-4-5@20251001",
 };
 
 afterEach(async () => {
@@ -128,7 +130,13 @@ describe("OpenCode deployment defaults", () => {
       model: "claude-opus-4-6",
       providerId: "vertex",
     };
-    const rendered = renderOpenCodeV1ConfigForCycle(vertexConfig, "vertex", deployment);
+    const rendered = renderOpenCodeV1ConfigForCycle(
+      vertexConfig,
+      "vertex",
+      deployment,
+      undefined,
+      parseVertexAllowedModels(gatewayEnvironment.VERTEX_ALLOWED_MODELS),
+    );
 
     expect(rendered.config).toMatchObject({
       model: "vertex/claude-opus-4-6",
@@ -141,7 +149,7 @@ describe("OpenCode deployment defaults", () => {
           models: expect.objectContaining({
             "claude-opus-4-6": expect.any(Object),
             "claude-sonnet-4-6": expect.any(Object),
-            "claude-haiku-4-5": expect.any(Object),
+            "claude-haiku-4-5@20251001": expect.any(Object),
           }),
         },
       },
@@ -208,6 +216,52 @@ describe("OpenCode deployment defaults", () => {
         VERTEX_ALLOWED_MODELS: "",
       }),
     ).toThrow("requires VERTEX_ALLOWED_MODELS");
+  });
+
+  it("falls back to selected Vertex model when Sonnet is outside the allowlist", async () => {
+    const deployment = await loadOpenCodeDeploymentConfig(undefined);
+    const vertexConfig = {
+      ...prepared.config,
+      model: "claude-opus-4-6",
+      providerId: "vertex",
+    };
+    const opusOnlyEnvironment = {
+      ...gatewayEnvironment,
+      VERTEX_ALLOWED_MODELS: "claude-opus-4-6",
+    };
+    const rendered = renderOpenCodeV1ConfigForCycle(
+      vertexConfig,
+      "vertex",
+      deployment,
+      undefined,
+      parseVertexAllowedModels(opusOnlyEnvironment.VERTEX_ALLOWED_MODELS),
+    );
+
+    expect(rendered.config.small_model).toBe("vertex/claude-opus-4-6");
+    expect(() =>
+      validateOpenCodeDeployment(
+        { ...prepared, config: vertexConfig },
+        deployment,
+        opusOnlyEnvironment,
+      ),
+    ).not.toThrow();
+  });
+
+  it("rejects an explicitly configured Vertex small model outside the allowlist", async () => {
+    const deployment = await loadOpenCodeDeploymentConfig(undefined);
+    const vertexConfig = {
+      ...prepared.config,
+      model: "claude-opus-4-6",
+      providerId: "vertex",
+    };
+    const smallSonnetDeployment = { ...deployment, smallModel: "vertex/claude-sonnet-4-6" };
+
+    expect(() =>
+      validateOpenCodeDeployment({ ...prepared, config: vertexConfig }, smallSonnetDeployment, {
+        ...gatewayEnvironment,
+        VERTEX_ALLOWED_MODELS: "claude-opus-4-6",
+      }),
+    ).toThrow("small model 'claude-sonnet-4-6' is not in VERTEX_ALLOWED_MODELS");
   });
 
   it("keeps REHOR_OPENCODE_DEPLOYMENT_CONFIG as an explicit file override", async () => {

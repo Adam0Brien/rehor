@@ -111,17 +111,17 @@ def test_preflight_bridge_returns_null_when_no_scripts(tmp_path):
 @pytest.mark.parametrize(
     "runtime, provider, json_budget, env_budget, expected_budget",
     [
-        ("opencode-v1", "rehor-openai", None, None, 200),
-        ("opencode-v1", "rehor-openai", 275, None, 275),
-        ("opencode-v1", "rehor-openai", 275, "450", 450),
-        ("opencode-v1", "vertex", None, None, 200),
-        ("opencode-v1", "vertex", 275, "450", 450),
+        ("opencode", "rehor-openai", None, None, 200),
+        ("opencode", "rehor-openai", 275, None, 275),
+        ("opencode", "rehor-openai", 275, "450", 450),
+        ("opencode", "vertex", None, None, 200),
+        ("opencode", "vertex", 275, "450", 450),
         ("claude", "vertex", None, None, 10),
         ("claude", "vertex", 275, "450", 10),
     ],
 )
 def test_prepare_bridge_reuses_runner_config_sequence(
-    tmp_path, monkeypatch, runtime, provider, json_budget, env_budget, expected_budget
+    tmp_path, monkeypatch, caplog, runtime, provider, json_budget, env_budget, expected_budget
 ):
     import bot.merge as merge
     import bot.run as runner
@@ -214,7 +214,7 @@ def test_prepare_bridge_reuses_runner_config_sequence(
     assert result["envs"] == ["github"]
     assert result["gitConfigGlobal"] == git_config_global
     assert result["runtimeId"] == runtime
-    assert len(assembled_claude_instructions) == (0 if runtime == "opencode-v1" else 1)
+    assert len(assembled_claude_instructions) == (1 if runtime == "claude" else 0)
     assert result["providerId"] == provider
     assert result["activeEnvs"] == ["github"]
     assert result["claudeMdStrategy"] == "append"
@@ -240,6 +240,24 @@ def test_prepare_bridge_reuses_runner_config_sequence(
     }
     assert result["optionalMcpServers"] == ["hcc-patternfly-data-view"]
     assert "Bash" in result["allowedTools"]
+    from bot.config import ALLOWED_TOOLS
+
+    assert "LSP" in ALLOWED_TOOLS
+    if runtime == "opencode":
+        assert result["allowedTools"] == [tool for tool in ALLOWED_TOOLS if tool != "LSP"]
+        assert "OpenCode V2.1.2 does not support LSP" in caplog.text
+    else:
+        assert result["allowedTools"] == ALLOWED_TOOLS
+        assert "does not support LSP" not in caplog.text
+
+
+def test_runtime_allowlist_only_omits_known_unsupported_tool(monkeypatch):
+    import bot.config as config
+    from bot.coordinator_bridge import _allowed_tools_for_runtime
+
+    monkeypatch.setattr(config, "ALLOWED_TOOLS", ["Read", "LSP", "UnknownFutureTool"])
+    assert _allowed_tools_for_runtime("opencode") == ["Read", "UnknownFutureTool"]
+    assert _allowed_tools_for_runtime("claude") == ["Read", "LSP", "UnknownFutureTool"]
 
 
 def test_prepare_bridge_reports_resolved_cycle_model(tmp_path, monkeypatch):

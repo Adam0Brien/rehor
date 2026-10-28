@@ -5,6 +5,7 @@ on:
     paths:
       - 'pyproject.toml'
       - 'uv.lock'
+      - 'requirements.txt'
       - 'proxy/executor/go.mod'
       - 'proxy/executor/go.sum'
       - 'dashboard/package-lock.json'
@@ -17,6 +18,7 @@ on:
     paths:
       - 'pyproject.toml'
       - 'uv.lock'
+      - 'requirements.txt'
       - 'proxy/executor/go.mod'
       - 'proxy/executor/go.sum'
       - 'dashboard/package-lock.json'
@@ -50,6 +52,11 @@ jobs:
 
       - name: Check lockfile drift
         run: uv lock --check
+
+      - name: Check requirements.txt export drift
+        run: |
+          uv export --frozen --no-dev --no-emit-project -o requirements.txt
+          git diff --exit-code HEAD -- requirements.txt
 
       - name: Run pip-audit
         run: |

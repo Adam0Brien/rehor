@@ -11,6 +11,8 @@ on:
       - 'dashboard/package-lock.json'
       - 'coordinator/package.json'
       - 'coordinator/package-lock.json'
+      - 'package.json'
+      - 'package-lock.json'
       - '.github/workflows/dependency-audit.yml'
   push:
     branches:
@@ -24,6 +26,8 @@ on:
       - 'dashboard/package-lock.json'
       - 'coordinator/package.json'
       - 'coordinator/package-lock.json'
+      - 'package.json'
+      - 'package-lock.json'
       - '.github/workflows/dependency-audit.yml'
   schedule:
     - cron: '30 7 * * 1' # every monday 7:30 UTC
@@ -161,6 +165,26 @@ jobs:
           node-version: '22'
           cache: npm
           cache-dependency-path: coordinator/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run npm audit
+        run: npm audit --audit-level high
+
+  root-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: package-lock.json
 
       - name: Install dependencies
         run: npm ci
